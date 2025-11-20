@@ -1,7 +1,7 @@
 {
-  "name": "skeleton-mcp",
+  "name": "facebook-ads-mcp",
   "version": "1.0.0",
-  "description": "Skeleton template for Cloudflare MCP servers with token integration",
+  "description": "Facebook Competitive Intelligence MCP Server - Scrapes Facebook Ad Library data via Apify and synthesizes it into strategic insights using AI",
   "private": true,
   "scripts": {
     "dev": "wrangler dev",

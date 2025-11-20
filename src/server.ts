@@ -2,12 +2,15 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ApiClient } from "./api-client";
-import type { Env } from "./types";
+import type { Env, SemaphoreSlot } from "./types";
 import { ResponseFormat } from "./types";
 import type { Props } from "./props";
 import { checkBalance, consumeTokensWithRetry } from "./tokenConsumption";
 import { formatInsufficientTokensError } from "./tokenUtils";
 import { sanitizeOutput, redactPII, validateOutput } from 'pilpat-mcp-security';
+import { ApifyClient } from "./apify-client";
+import { getCachedApifyResult, setCachedApifyResult, hashApifyInput } from "./apify-cache";
+import { makeAIGatewayRequest, formatAIGatewayError } from "./ai-gateway";
 
 /**
  * TODO: Rename this class to match your server name (e.g., WeatherMCP, NewsMCP, etc.)
@@ -33,7 +36,7 @@ import { sanitizeOutput, redactPII, validateOutput } from 'pilpat-mcp-security';
  */
 export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
     server = new McpServer({
-        name: "Skeleton MCP Server", // TODO: Update server name
+        name: "Facebook Ads MCP Server",
         version: "1.0.0",
     });
 
@@ -44,59 +47,604 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
     async init() {
         // ========================================================================
-        // API CLIENT INITIALIZATION
+        // Tool 1: analyzeCompetitorStrategy (5 tokens)
         // ========================================================================
-        // TODO: Initialize your custom API client here when implementing tools
-        // Example: const apiClient = new YourApiClient(this.env.YOUR_API_KEY);
-        // DO NOT uncomment until you have implemented your custom API client class
+        this.server.tool(
+            "analyzeCompetitorStrategy",
+            "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
+            {
+                facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
+                max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
+            },
+            async (params) => {
+                const actionId = crypto.randomUUID();
+                const ACTOR_ID = "apify/facebook-ads-scraper";
+                const FLAT_COST = 5;
+                const TOOL_NAME = "analyzeCompetitorStrategy";
+                const TIMEOUT = 120;
+                const CACHE_TTL = 21600; // 6 hours
+
+                let slot: SemaphoreSlot | null = null;
+                let userId: string | undefined;
+
+                try {
+                    // STEP 1: Get User ID
+                    userId = this.props?.userId;
+                    if (!userId) throw new Error("User ID not found");
+
+                    // Validate Facebook URL
+                    const facebookUrlPattern = /^https:\/\/(www\.)?facebook\.com\/.+$/;
+                    if (!facebookUrlPattern.test(params.facebook_page_url)) {
+                        throw new Error("Invalid Facebook Page URL. Must start with https://facebook.com/");
+                    }
+
+                    // STEP 2: Check Balance (Flat Cost)
+                    const balanceCheck = await checkBalance(this.env.TOKEN_DB, userId, FLAT_COST);
+
+                    // STEP 3: Handle Insufficient Balance
+                    if (!balanceCheck.sufficient) {
+                        return {
+                            isError: true,
+                            content: [{
+                                type: "text",
+                                text: formatInsufficientTokensError(TOOL_NAME, balanceCheck.currentBalance, FLAT_COST)
+                            }]
+                        };
+                    }
+
+                    // STEP 3.5: Check Cache (CACHE-BEFORE-SEMAPHORE)
+                    const actorInput = {
+                        startUrls: [{ url: params.facebook_page_url }],
+                        resultsLimit: params.max_ads_to_analyze || 10,
+                        activeStatus: "active",
+                        onlyTotal: false,
+                        isDetailsPerAd: true,
+                        proxy: { useApifyProxy: true }
+                    };
+                    const cacheKey = await hashApifyInput({ actorId: ACTOR_ID, input: actorInput });
+                    const cached = await getCachedApifyResult<any>(
+                        this.env.APIFY_CACHE,
+                        ACTOR_ID,
+                        cacheKey
+                    );
+
+                    if (cached) {
+                        console.log(`[Cache HIT] ${TOOL_NAME}`);
+
+                        const cachedCost = cached ? FLAT_COST : 0;
+                        if (cachedCost > 0) {
+                            await consumeTokensWithRetry(
+                                this.env.TOKEN_DB,
+                                userId,
+                                cachedCost,
+                                "facebook-ads-mcp",
+                                TOOL_NAME,
+                                params,
+                                cached,
+                                true,
+                                actionId
+                            );
+                        }
+
+                        return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+                    }
+
+                    console.log(`[Cache MISS] ${TOOL_NAME}`);
+
+                    // STEP 3.7: Acquire Semaphore (Only on Cache Miss)
+                    const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
+                    const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
+                    slot = await semaphore.acquireSlot(userId, ACTOR_ID);
+
+                    // STEP 4: Execute Apify Actor
+                    const apifyClient = new ApifyClient(this.env.APIFY_API_TOKEN);
+                    const results = await apifyClient.runActorSync<any>(
+                        ACTOR_ID,
+                        actorInput,
+                        TIMEOUT
+                    );
+
+                    const rawAds = results.items || [];
+
+                    // Calculate format statistics
+                    const videoCount = rawAds.filter((ad: any) => ad.snapshot?.cards?.[0]?.video_hd_url).length;
+                    const imageCount = rawAds.length - videoCount;
+                    const formatStats = {
+                        total: rawAds.length,
+                        video_percentage: rawAds.length > 0 ? Math.round((videoCount / rawAds.length) * 100) : 0,
+                        image_percentage: rawAds.length > 0 ? Math.round((imageCount / rawAds.length) * 100) : 0
+                    };
+
+                    // Extract ad texts for AI synthesis
+                    const adTexts = rawAds
+                        .map((ad: any) => ad.snapshot?.body?.text)
+                        .filter((text: string) => text && text.length > 0)
+                        .slice(0, 10);  // Limit to 10 for AI processing
+
+                    // AI Gateway: Synthesize marketing hooks
+                    let marketingHooks: any = { hooks: [] };
+                    if (adTexts.length > 0) {
+                        const aiResponse = await makeAIGatewayRequest(
+                            { gatewayId: this.env.AI_GATEWAY_ID, token: this.env.AI_GATEWAY_TOKEN },
+                            "workers-ai",
+                            "@cf/meta/llama-3-8b-instruct",
+                            {
+                                prompt: `Analyze these Facebook ad texts and extract 3 key marketing hooks:\n\n${adTexts.join('\n---\n')}\n\nReturn JSON: {"hooks": ["hook1", "hook2", "hook3"]}`
+                            },
+                            3600
+                        );
+
+                        if (aiResponse.success) {
+                            try {
+                                marketingHooks = JSON.parse((aiResponse.data as any)?.response || '{"hooks": []}');
+                            } catch {
+                                marketingHooks = { hooks: [] };
+                            }
+                        }
+                    }
+
+                    // Combine results
+                    const finalResult = {
+                        format_statistics: formatStats,
+                        marketing_hooks: marketingHooks,
+                        metadata: {
+                            page_name: rawAds[0]?.pageName || "Unknown",
+                            analysis_date: new Date().toISOString(),
+                            sample_size: rawAds.length
+                        }
+                    };
+
+                    // STEP 4.5: Apply Security
+                    const sanitized = sanitizeOutput(JSON.stringify(finalResult), {
+                        maxLength: 10000,
+                        removeHtml: true,
+                        removeControlChars: true,
+                        normalizeWhitespace: true
+                    });
+
+                    const redacted = redactPII(sanitized, {
+                        redactEmails: false,
+                        redactPhones: false,
+                        redactCreditCards: true,
+                        redactSSN: true,
+                        redactBankAccounts: true,
+                        redactPESEL: true,
+                        redactPolishIdCard: true,
+                        redactPolishPassport: true,
+                        redactPolishPhones: false
+                    });
+
+                    const secureResult = JSON.parse(redacted.redacted);
+
+                    // Cache result
+                    await setCachedApifyResult(
+                        this.env.APIFY_CACHE,
+                        ACTOR_ID,
+                        cacheKey,
+                        secureResult,
+                        CACHE_TTL
+                    );
+
+                    // STEP 5: Consume Tokens (Flat Pricing)
+                    const actualCost = rawAds.length > 0 ? FLAT_COST : 1;
+                    await consumeTokensWithRetry(
+                        this.env.TOKEN_DB,
+                        userId,
+                        actualCost,
+                        "facebook-ads-mcp",
+                        TOOL_NAME,
+                        params,
+                        secureResult,
+                        false,
+                        actionId
+                    );
+
+                    // STEP 6: Return Result
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(secureResult)
+                        }]
+                    };
+
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    console.error(`[${TOOL_NAME}] Error:`, errorMessage);
+                    return {
+                        isError: true,
+                        content: [{
+                            type: "text",
+                            text: `Error: ${errorMessage}`
+                        }]
+                    };
+                } finally {
+                    // CRITICAL: Always release semaphore slot
+                    if (slot && slot.acquired && userId) {
+                        const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
+                        const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
+                        await semaphore.releaseSlot(userId);
+                    }
+                }
+            }
+        );
 
         // ========================================================================
-        // TOOL REGISTRATION SECTION
+        // Tool 2: fetchCreativeGallery (3 tokens)
         // ========================================================================
-        // Tools will be generated here by the automated boilerplate generator
-        // Usage: npm run generate-tool --prp PRPs/your-prp.md --tool-id your_tool --output snippets
-        //
-        // Or implement tools manually following the 7-Step Token Pattern:
-        // Step 0: Generate actionId for idempotency
-        // Step 1: Get userId from this.props
-        // Step 2: Check token balance with checkBalance()
-        // Step 3: Handle insufficient balance
-        // Step 4: Execute business logic
-        // Step 4.5: Apply security (sanitizeOutput + redactPII)
-        // Step 5: Consume tokens with consumeTokensWithRetry()
-        // Step 6: Return result
-        //
-        // Tool Design Best Practices:
-        // ✅ Consolidation: Combine multi-step operations into goal-oriented tools
-        // ✅ ResponseFormat: Add format parameter for large datasets (concise/detailed)
-        // ✅ Context Optimization: Return semantic data (names) not technical (IDs)
-        // ✅ Token Efficiency: Implement pagination, filtering, smart defaults
-        // ✅ Single-Item Inputs: Accept one item per call to enable deep AI analysis
-        //    - Use: pageUrl: z.string().url() (Analyst mode - deep insights)
-        //    - NOT: pageUrls: z.array(z.string()) (Aggregator mode - shallow lists)
-        //    - Rationale: Array inputs flood LLM context → forces shallow aggregation
-        //    - Exception: Batch export tools where aggregation IS the goal
-        //
-        // Tool Description Best Practices (CRITICAL):
-        // Tool descriptions are the PRIMARY interface between LLMs and your API.
-        // Poor descriptions → wrong tool selection → wasted tokens → broken workflows.
-        //
-        // ✅ 3-Part Structure (MANDATORY):
-        //    "[Action Verb] [what it does]. " +                           // Part 1: Purpose
-        //    "Returns [specific fields]. Use this when [scenario]. " +   // Part 2: Details
-        //    "⚠️ Costs X tokens per use."                                 // Part 3: Cost
-        //
-        // ✅ Security Policy:
-        //    - HIDE: API/vendor names (Apify, SerpData, DataForSEO, etc.)
-        //    - KEEP: Platform names that are subjects (LinkedIn, Twitter, YouTube)
-        //    - Example: "Scrape LinkedIn profile" ✅  vs "Use Apify to scrape" ❌
-        //
-        // ✅ Action Verbs: Fetch, Scrape, Extract, Search, Transform, Analyze
-        // ✅ Use Cases: Include "Use this when..." to guide LLM decision-making
-        // ✅ Examples: Add format examples in parameter descriptions (e.g., "YYYY-MM-DD")
-        //
-        // Reference: /TOOL_DESCRIPTION_DESIGN_GUIDE.md for production examples
-        //
-        // TODO: Add your tools here (manually or via generator)
+        this.server.tool(
+            "fetchCreativeGallery",
+            "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
+            {
+                facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
+                limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")
+            },
+            async (params) => {
+                const actionId = crypto.randomUUID();
+                const ACTOR_ID = "apify/facebook-ads-scraper";
+                const FLAT_COST = 3;
+                const TOOL_NAME = "fetchCreativeGallery";
+                const TIMEOUT = 120;
+                const CACHE_TTL = 21600; // 6 hours
+
+                let slot: SemaphoreSlot | null = null;
+                let userId: string | undefined;
+
+                try {
+                    // STEP 1: Get User ID
+                    userId = this.props?.userId;
+                    if (!userId) throw new Error("User ID not found");
+
+                    // Validate Facebook URL
+                    const facebookUrlPattern = /^https:\/\/(www\.)?facebook\.com\/.+$/;
+                    if (!facebookUrlPattern.test(params.facebook_page_url)) {
+                        throw new Error("Invalid Facebook Page URL. Must start with https://facebook.com/");
+                    }
+
+                    // STEP 2: Check Balance (Flat Cost)
+                    const balanceCheck = await checkBalance(this.env.TOKEN_DB, userId, FLAT_COST);
+
+                    // STEP 3: Handle Insufficient Balance
+                    if (!balanceCheck.sufficient) {
+                        return {
+                            isError: true,
+                            content: [{
+                                type: "text",
+                                text: formatInsufficientTokensError(TOOL_NAME, balanceCheck.currentBalance, FLAT_COST)
+                            }]
+                        };
+                    }
+
+                    // STEP 3.5: Check Cache (CACHE-BEFORE-SEMAPHORE)
+                    const actorInput = {
+                        startUrls: [{ url: params.facebook_page_url }],
+                        resultsLimit: params.limit || 10,
+                        activeStatus: "active",
+                        onlyTotal: false,
+                        isDetailsPerAd: true,
+                        proxy: { useApifyProxy: true }
+                    };
+                    const cacheKey = await hashApifyInput({ actorId: ACTOR_ID, input: actorInput });
+                    const cached = await getCachedApifyResult<any>(
+                        this.env.APIFY_CACHE,
+                        ACTOR_ID,
+                        cacheKey
+                    );
+
+                    if (cached) {
+                        console.log(`[Cache HIT] ${TOOL_NAME}`);
+
+                        const cachedCost = cached ? FLAT_COST : 0;
+                        if (cachedCost > 0) {
+                            await consumeTokensWithRetry(
+                                this.env.TOKEN_DB,
+                                userId,
+                                cachedCost,
+                                "facebook-ads-mcp",
+                                TOOL_NAME,
+                                params,
+                                cached,
+                                true,
+                                actionId
+                            );
+                        }
+
+                        return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+                    }
+
+                    console.log(`[Cache MISS] ${TOOL_NAME}`);
+
+                    // STEP 3.7: Acquire Semaphore (Only on Cache Miss)
+                    const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
+                    const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
+                    slot = await semaphore.acquireSlot(userId, ACTOR_ID);
+
+                    // STEP 4: Execute Apify Actor
+                    const apifyClient = new ApifyClient(this.env.APIFY_API_TOKEN);
+                    const results = await apifyClient.runActorSync<any>(
+                        ACTOR_ID,
+                        actorInput,
+                        TIMEOUT
+                    );
+
+                    const rawAds = results.items || [];
+
+                    // Extract creative assets
+                    const creatives = rawAds.map((ad: any) => {
+                        const card = ad.snapshot?.cards?.[0];
+                        const isVideo = !!card?.video_hd_url;
+
+                        return {
+                            type: isVideo ? "video" : "image",
+                            url: isVideo ? card.video_hd_url : card?.originalImageUrl,
+                            thumbnail_url: card?.originalImageUrl,
+                            headline: ad.snapshot?.title || "",
+                            body_text: ad.snapshot?.body?.text || "",
+                            cta: ad.snapshot?.ctaText || ""
+                        };
+                    }).filter((creative: any) => creative.url);
+
+                    const finalResult = {
+                        creatives: creatives,
+                        metadata: {
+                            total_count: creatives.length,
+                            page_name: rawAds[0]?.pageName || "Unknown",
+                            fetch_date: new Date().toISOString()
+                        }
+                    };
+
+                    // STEP 4.5: Apply Security
+                    const sanitized = sanitizeOutput(JSON.stringify(finalResult), {
+                        maxLength: 10000,
+                        removeHtml: true,
+                        removeControlChars: true,
+                        normalizeWhitespace: true
+                    });
+
+                    const redacted = redactPII(sanitized, {
+                        redactEmails: false,
+                        redactPhones: false,
+                        redactCreditCards: true,
+                        redactSSN: true,
+                        redactBankAccounts: true,
+                        redactPESEL: true,
+                        redactPolishIdCard: true,
+                        redactPolishPassport: true,
+                        redactPolishPhones: false
+                    });
+
+                    const secureResult = JSON.parse(redacted.redacted);
+
+                    // Cache result
+                    await setCachedApifyResult(
+                        this.env.APIFY_CACHE,
+                        ACTOR_ID,
+                        cacheKey,
+                        secureResult,
+                        CACHE_TTL
+                    );
+
+                    // STEP 5: Consume Tokens (Flat Pricing)
+                    const actualCost = creatives.length > 0 ? FLAT_COST : 1;
+                    await consumeTokensWithRetry(
+                        this.env.TOKEN_DB,
+                        userId,
+                        actualCost,
+                        "facebook-ads-mcp",
+                        TOOL_NAME,
+                        params,
+                        secureResult,
+                        false,
+                        actionId
+                    );
+
+                    // STEP 6: Return Result
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(secureResult)
+                        }]
+                    };
+
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    console.error(`[${TOOL_NAME}] Error:`, errorMessage);
+                    return {
+                        isError: true,
+                        content: [{
+                            type: "text",
+                            text: `Error: ${errorMessage}`
+                        }]
+                    };
+                } finally {
+                    // CRITICAL: Always release semaphore slot
+                    if (slot && slot.acquired && userId) {
+                        const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
+                        const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
+                        await semaphore.releaseSlot(userId);
+                    }
+                }
+            }
+        );
+
+        // ========================================================================
+        // Tool 3: checkActivityPulse (1 token)
+        // ========================================================================
+        this.server.tool(
+            "checkActivityPulse",
+            "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
+            {
+                facebook_page_url: z.string().describe("Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required.")
+            },
+            async (params) => {
+                const actionId = crypto.randomUUID();
+                const ACTOR_ID = "apify/facebook-ads-scraper";
+                const FLAT_COST = 1;
+                const TOOL_NAME = "checkActivityPulse";
+                const TIMEOUT = 60;
+                const CACHE_TTL = 21600; // 6 hours
+
+                let slot: SemaphoreSlot | null = null;
+                let userId: string | undefined;
+
+                try {
+                    // STEP 1: Get User ID
+                    userId = this.props?.userId;
+                    if (!userId) throw new Error("User ID not found");
+
+                    // Validate Facebook URL
+                    const facebookUrlPattern = /^https:\/\/(www\.)?facebook\.com\/.+$/;
+                    if (!facebookUrlPattern.test(params.facebook_page_url)) {
+                        throw new Error("Invalid Facebook Page URL. Must start with https://facebook.com/");
+                    }
+
+                    // STEP 2: Check Balance (Flat Cost)
+                    const balanceCheck = await checkBalance(this.env.TOKEN_DB, userId, FLAT_COST);
+
+                    // STEP 3: Handle Insufficient Balance
+                    if (!balanceCheck.sufficient) {
+                        return {
+                            isError: true,
+                            content: [{
+                                type: "text",
+                                text: formatInsufficientTokensError(TOOL_NAME, balanceCheck.currentBalance, FLAT_COST)
+                            }]
+                        };
+                    }
+
+                    // STEP 3.5: Check Cache (CACHE-BEFORE-SEMAPHORE)
+                    const actorInput = {
+                        startUrls: [{ url: params.facebook_page_url }],
+                        resultsLimit: 1,
+                        activeStatus: "active",
+                        onlyTotal: true,
+                        isDetailsPerAd: false,
+                        proxy: { useApifyProxy: true }
+                    };
+                    const cacheKey = await hashApifyInput({ actorId: ACTOR_ID, input: actorInput });
+                    const cached = await getCachedApifyResult<any>(
+                        this.env.APIFY_CACHE,
+                        ACTOR_ID,
+                        cacheKey
+                    );
+
+                    if (cached) {
+                        console.log(`[Cache HIT] ${TOOL_NAME}`);
+
+                        const cachedCost = cached ? FLAT_COST : 0;
+                        if (cachedCost > 0) {
+                            await consumeTokensWithRetry(
+                                this.env.TOKEN_DB,
+                                userId,
+                                cachedCost,
+                                "facebook-ads-mcp",
+                                TOOL_NAME,
+                                params,
+                                cached,
+                                true,
+                                actionId
+                            );
+                        }
+
+                        return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+                    }
+
+                    console.log(`[Cache MISS] ${TOOL_NAME}`);
+
+                    // STEP 3.7: Acquire Semaphore (Only on Cache Miss)
+                    const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
+                    const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
+                    slot = await semaphore.acquireSlot(userId, ACTOR_ID);
+
+                    // STEP 4: Execute Apify Actor
+                    const apifyClient = new ApifyClient(this.env.APIFY_API_TOKEN);
+                    const results = await apifyClient.runActorSync<any>(
+                        ACTOR_ID,
+                        actorInput,
+                        TIMEOUT
+                    );
+
+                    const totalCount = results.items?.[0]?.totalCount || 0;
+                    const pageName = results.items?.[0]?.pageName || "Unknown";
+
+                    const finalResult = {
+                        is_active: totalCount > 0,
+                        total_ads: totalCount,
+                        page_name: pageName,
+                        last_updated: new Date().toISOString()
+                    };
+
+                    // STEP 4.5: Apply Security
+                    const sanitized = sanitizeOutput(JSON.stringify(finalResult), {
+                        maxLength: 1000,
+                        removeHtml: true,
+                        removeControlChars: true,
+                        normalizeWhitespace: true
+                    });
+
+                    const redacted = redactPII(sanitized, {
+                        redactEmails: false,
+                        redactPhones: false,
+                        redactCreditCards: true,
+                        redactSSN: true,
+                        redactBankAccounts: true,
+                        redactPESEL: true,
+                        redactPolishIdCard: true,
+                        redactPolishPassport: true,
+                        redactPolishPhones: false
+                    });
+
+                    const secureResult = JSON.parse(redacted.redacted);
+
+                    // Cache result
+                    await setCachedApifyResult(
+                        this.env.APIFY_CACHE,
+                        ACTOR_ID,
+                        cacheKey,
+                        secureResult,
+                        CACHE_TTL
+                    );
+
+                    // STEP 5: Consume Tokens (Flat Pricing)
+                    const actualCost = FLAT_COST;
+                    await consumeTokensWithRetry(
+                        this.env.TOKEN_DB,
+                        userId,
+                        actualCost,
+                        "facebook-ads-mcp",
+                        TOOL_NAME,
+                        params,
+                        secureResult,
+                        false,
+                        actionId
+                    );
+
+                    // STEP 6: Return Result
+                    return {
+                        content: [{
+                            type: "text",
+                            text: JSON.stringify(secureResult)
+                        }]
+                    };
+
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    console.error(`[${TOOL_NAME}] Error:`, errorMessage);
+                    return {
+                        isError: true,
+                        content: [{
+                            type: "text",
+                            text: `Error: ${errorMessage}`
+                        }]
+                    };
+                } finally {
+                    // CRITICAL: Always release semaphore slot
+                    if (slot && slot.acquired && userId) {
+                        const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
+                        const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
+                        await semaphore.releaseSlot(userId);
+                    }
+                }
+            }
+        );
     }
 }

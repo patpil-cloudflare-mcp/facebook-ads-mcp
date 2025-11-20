@@ -23,7 +23,7 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "apify-skeleton-mcp",  // Apify MCP Skeleton Template
+  "name": "facebook-ads-mcp",  // Facebook Competitive Intelligence MCP
   "main": "src/index.ts",
   "compatibility_date": "2025-03-10",
   "compatibility_flags": ["nodejs_compat"],
@@ -87,6 +87,11 @@
       "binding": "USER_SESSIONS",
       "id": "e5ad189139cd44f38ba0224c3d596c73",         // From CLOUDFLARE_CONFIG.md (MANDATORY)
       "preview_id": "49c43fb4d6e242db87fd885ba46b5a1d"  // For local testing
+    },
+    {
+      "binding": "APIFY_CACHE",
+      "id": "fa6ff790f146478e85ea77ae4a5caa4b",         // From CLOUDFLARE_CONFIG.md
+      "preview_id": "4b37112559f2429191633d98781645ca"  // For local testing
     }
   ],
 
@@ -106,13 +111,13 @@
   ],
 
   /**
-   * OPTIONAL: Workers AI binding for AI models
+   * REQUIRED: Workers AI binding for AI models
    *
-   * Uncomment if you need to use Workers AI:
+   * Used for AI-powered synthesis of marketing hooks in analyze_competitor_strategy tool
    */
-  // "ai": {
-  //   "binding": "AI"
-  // },
+  "ai": {
+    "binding": "AI"
+  },
 
   /**
    * OPTIONAL: Additional KV namespaces

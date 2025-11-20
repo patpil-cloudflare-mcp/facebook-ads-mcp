@@ -65,6 +65,12 @@ export interface Env {
 
     /** KV namespace for caching Apify results (15-minute TTL for hot queries) */
     CACHE_KV: KVNamespace;
+
+    /** KV namespace specifically for Apify result caching (extended 6-hour TTL for competitive intelligence) */
+    APIFY_CACHE: KVNamespace;
+
+    /** Workers AI binding for AI-powered synthesis of marketing hooks */
+    AI: Ai;
 }
 
 /**
