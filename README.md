@@ -1,6 +1,8 @@
-# Skeleton MCP Server - Quick Start Template
+# Facebook Ads MCP Server
 
-Production-ready template for building Cloudflare MCP servers with integrated token system.
+**Last Deployment Test**: 2025-11-20 (GitHub → Cloudflare Workers Builds Integration Test)
+
+Production-ready Cloudflare MCP server with Apify integration for Facebook Ad Library intelligence.
 
 ## Features
 
