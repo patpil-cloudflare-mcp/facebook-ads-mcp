@@ -1,0 +1,65 @@
+# Development Environment Variables
+#
+# IMPORTANT: Copy this file to .dev.vars and fill in real values
+#   cp .dev.vars.example .dev.vars
+#
+# NEVER commit .dev.vars (it's in .gitignore)
+#
+# These variables are automatically loaded by Cloudflare Workers in development.
+# For production, use: wrangler secret put SECRET_NAME
+
+# ============================================================================
+# WORKOS AUTHENTICATION (REQUIRED)
+# ============================================================================
+# Get these from: https://dashboard.workos.com/
+# 1. Go to WorkOS Dashboard
+# 2. Select your project
+# 3. Navigate to API Keys section
+
+# WorkOS Client ID (public identifier, starts with client_)
+WORKOS_CLIENT_ID=client_XXXXXXXXXXXXXXXXXXXXXXXXXX
+
+# WorkOS API Key (secret, starts with sk_)
+WORKOS_API_KEY=sk_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+# ============================================================================
+# APIFY INTEGRATION (REQUIRED for Apify-based MCP servers)
+# ============================================================================
+# Get from: https://console.apify.com/account/integrations
+# 1. Log in to Apify Console
+# 2. Go to Settings → Integrations
+# 3. Copy your API token (starts with apify_api_)
+
+# Apify API Token (40 characters)
+APIFY_API_TOKEN=apify_api_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+# ============================================================================
+# AI GATEWAY (Optional - for rate limiting and caching)
+# ============================================================================
+# Get from Cloudflare Dashboard:
+# 1. Go to AI → AI Gateway
+# 2. Create a new gateway or select existing
+# 3. Copy Gateway ID and API token
+
+# AI Gateway ID (if using Cloudflare AI Gateway)
+# AI_GATEWAY_ID=your-gateway-id
+
+# AI Gateway Token (if required)
+# AI_GATEWAY_TOKEN=your-gateway-token
+
+# ============================================================================
+# CUSTOM ENVIRONMENT VARIABLES
+# ============================================================================
+# Add any additional secrets your server needs below
+# Examples:
+# EXTERNAL_API_KEY=your_api_key_here
+# EXTERNAL_API_URL=https://api.example.com
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# - All secrets above are required for local development
+# - For production deployment, use: wrangler secret put SECRET_NAME
+# - Example: echo "real_token" | wrangler secret put APIFY_API_TOKEN
+# - Never hardcode these values in source code
+# - Resource IDs (D1, KV, R2) are configured in wrangler.jsonc, not here

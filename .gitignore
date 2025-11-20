@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+
+# Development environment variables (NEVER commit secrets!)
+.dev.vars
+.env
+.env.local
+.env.*.local
+
+# Planning documents (may contain credentials/API keys)
+*.prp
+*_prp.md
+*.prp.md
+PRPs/
+
+# Documentation drafts (often contain secrets during development)
+*_idea_template.md
+*-transcript.md
+*_apify.md
+*_planning.md
+*.draft.md
+*_notes.md
+
+# Configuration backups (may contain secrets)
+*.backup
+wrangler.jsonc.backup
+CLOUDFLARE_CONFIG.md.backup
+
+# Wrangler
+.wrangler/
+wrangler.toml
+worker-configuration.d.ts
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
