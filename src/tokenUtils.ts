@@ -487,9 +487,33 @@ export function formatOAuthSuccessPage(
         </div>
     </div>
     <script>
-        setTimeout(function() {
-            window.location.href = '${escapeJs(redirectUrl)}';
-        }, ${redirectDelay});
+        (function() {
+            var redirected = false;
+            var btn = document.querySelector('.button');
+            var closeText = document.querySelector('.close-text span');
+            var spinner = document.querySelector('.spinner');
+
+            // Auto-redirect after delay
+            setTimeout(function() {
+                redirected = true;
+                // Update UI to show redirect happened
+                if (btn) btn.style.display = 'none';
+                if (closeText) closeText.textContent = 'Przekierowano! Możesz zamknąć to okno.';
+                if (spinner) spinner.style.display = 'none';
+                // Perform redirect
+                window.location.href = '${escapeJs(redirectUrl)}';
+            }, ${redirectDelay});
+
+            // Prevent button click if already redirected (one-time use OAuth code)
+            if (btn) {
+                btn.addEventListener('click', function(e) {
+                    if (redirected) {
+                        e.preventDefault();
+                        alert('Przekierowanie już nastąpiło. Możesz zamknąć to okno.');
+                    }
+                });
+            }
+        })();
     </script>
 </body>
 </html>`;
