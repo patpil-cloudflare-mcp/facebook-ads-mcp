@@ -4,7 +4,7 @@ import * as jose from "jose";
 import { type AccessToken, type AuthenticationResponse, WorkOS } from "@workos-inc/node";
 import type { Env } from "./types";
 import type { Props } from "./props";
-import { getUserByEmail, formatPurchaseRequiredPage, formatAccountDeletedPage } from "./tokenUtils";
+import { getUserByEmail, formatPurchaseRequiredPage, formatAccountDeletedPage, formatOAuthSuccessPage } from "./tokenUtils";
 
 /**
  * Authentication handler for WorkOS AuthKit integration
@@ -178,7 +178,9 @@ app.get("/authorize", async (c) => {
             } satisfies Props,
         });
 
-        return Response.redirect(redirectTo);
+        // Show success page with auto-redirect (provides user feedback)
+        console.log(`✅ [OAuth] Authorization complete for: ${session.email}, redirecting to MCP client`);
+        return c.html(formatOAuthSuccessPage(session.email, redirectTo), 200);
     }
 
     // ============================================================
@@ -278,8 +280,9 @@ app.get("/callback", async (c) => {
         } satisfies Props,
     });
 
-    // Redirect user back to MCP client with authorization complete
-    return Response.redirect(redirectTo);
+    // Show success page with auto-redirect (provides user feedback)
+    console.log(`✅ [OAuth Callback] Authorization complete for: ${user.email}, redirecting to MCP client`);
+    return c.html(formatOAuthSuccessPage(user.email, redirectTo), 200);
 });
 
 export const AuthkitHandler = app;
