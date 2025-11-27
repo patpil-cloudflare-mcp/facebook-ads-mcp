@@ -311,12 +311,30 @@ async function getOrCreateServer(
   // Reference: /TOOL_DESCRIPTION_DESIGN_GUIDE.md for production examples
 
   // Tool 1: analyzeCompetitorStrategy (5 tokens)
-  server.tool(
+  server.registerTool(
     "analyzeCompetitorStrategy",
-    "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
     {
-      facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
-      max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
+      title: "Analyze Competitor Strategy",
+      description: "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
+      inputSchema: {
+        facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
+        max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
+      },
+      outputSchema: {
+        format_statistics: z.object({
+          total: z.number(),
+          video_percentage: z.number(),
+          image_percentage: z.number()
+        }),
+        marketing_hooks: z.object({
+          hooks: z.array(z.string()).optional()
+        }).optional(),
+        metadata: z.object({
+          page_name: z.string().optional(),
+          analysis_date: z.string(),
+          sample_size: z.number()
+        }).optional()
+      }
     },
     async (params) => {
       const result = await executeAnalyzeCompetitorStrategyTool(params, env, userId);
@@ -325,12 +343,30 @@ async function getOrCreateServer(
   );
 
   // Tool 2: fetchCreativeGallery (3 tokens)
-  server.tool(
+  server.registerTool(
     "fetchCreativeGallery",
-    "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
     {
-      facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
-      limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")
+      title: "Fetch Creative Gallery",
+      description: "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
+      inputSchema: {
+        facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
+        limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")
+      },
+      outputSchema: {
+        creatives: z.array(z.object({
+          type: z.string(),
+          url: z.string().url().optional(),
+          thumbnail_url: z.string().optional(),
+          headline: z.string().optional(),
+          body_text: z.string().optional(),
+          cta: z.string().optional()
+        })),
+        metadata: z.object({
+          total_count: z.number(),
+          page_name: z.string(),
+          fetch_date: z.string()
+        }).optional()
+      }
     },
     async (params) => {
       const result = await executeFetchCreativeGalleryTool(params, env, userId);
@@ -339,11 +375,20 @@ async function getOrCreateServer(
   );
 
   // Tool 3: checkActivityPulse (1 token)
-  server.tool(
+  server.registerTool(
     "checkActivityPulse",
-    "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
     {
-      facebook_page_url: z.string().describe("Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required.")
+      title: "Check Activity Pulse",
+      description: "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
+      inputSchema: {
+        facebook_page_url: z.string().describe("Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required.")
+      },
+      outputSchema: {
+        is_active: z.boolean(),
+        total_ads: z.number(),
+        page_name: z.string(),
+        last_updated: z.string()
+      }
     },
     async (params) => {
       const result = await executeCheckActivityPulseTool(params, env, userId);
@@ -511,6 +556,7 @@ async function handleToolsList(
   const tools: any[] = [
     {
       name: "analyzeCompetitorStrategy",
+      title: "Analyze Competitor Strategy",
       description: "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
       inputSchema: {
         type: "object",
@@ -525,10 +571,41 @@ async function handleToolsList(
           }
         },
         required: ["facebook_page_url"]
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          format_statistics: {
+            type: "object",
+            properties: {
+              total: { type: "number" },
+              video_percentage: { type: "number" },
+              image_percentage: { type: "number" }
+            }
+          },
+          marketing_hooks: {
+            type: "object",
+            properties: {
+              hooks: {
+                type: "array",
+                items: { type: "string" }
+              }
+            }
+          },
+          metadata: {
+            type: "object",
+            properties: {
+              page_name: { type: "string" },
+              analysis_date: { type: "string" },
+              sample_size: { type: "number" }
+            }
+          }
+        }
       }
     },
     {
       name: "fetchCreativeGallery",
+      title: "Fetch Creative Gallery",
       description: "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
       inputSchema: {
         type: "object",
@@ -543,10 +620,38 @@ async function handleToolsList(
           }
         },
         required: ["facebook_page_url"]
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          creatives: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                type: { type: "string" },
+                url: { type: "string" },
+                thumbnail_url: { type: "string" },
+                headline: { type: "string" },
+                body_text: { type: "string" },
+                cta: { type: "string" }
+              }
+            }
+          },
+          metadata: {
+            type: "object",
+            properties: {
+              total_count: { type: "number" },
+              page_name: { type: "string" },
+              fetch_date: { type: "string" }
+            }
+          }
+        }
       }
     },
     {
       name: "checkActivityPulse",
+      title: "Check Activity Pulse",
       description: "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
       inputSchema: {
         type: "object",
@@ -557,6 +662,15 @@ async function handleToolsList(
           }
         },
         required: ["facebook_page_url"]
+      },
+      outputSchema: {
+        type: "object",
+        properties: {
+          is_active: { type: "boolean" },
+          total_ads: { type: "number" },
+          page_name: { type: "string" },
+          last_updated: { type: "string" }
+        }
       }
     }
   ];
@@ -717,7 +831,10 @@ async function executeAnalyzeCompetitorStrategyTool(
           actionId
         );
       }
-      return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(cached) }],
+        structuredContent: cached
+      };
     }
 
     console.log(`[Cache MISS] ${TOOL_NAME}`);
@@ -818,7 +935,10 @@ async function executeAnalyzeCompetitorStrategyTool(
     );
 
     // STEP 6: Return Result
-    return { content: [{ type: "text", text: JSON.stringify(secureResult) }] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(secureResult) }],
+      structuredContent: secureResult
+    };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -901,7 +1021,10 @@ async function executeFetchCreativeGalleryTool(
           actionId
         );
       }
-      return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(cached) }],
+        structuredContent: cached
+      };
     }
 
     console.log(`[Cache MISS] ${TOOL_NAME}`);
@@ -978,7 +1101,10 @@ async function executeFetchCreativeGalleryTool(
     );
 
     // STEP 6: Return Result
-    return { content: [{ type: "text", text: JSON.stringify(secureResult) }] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(secureResult) }],
+      structuredContent: secureResult
+    };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1061,7 +1187,10 @@ async function executeCheckActivityPulseTool(
           actionId
         );
       }
-      return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+      return {
+        content: [{ type: "text", text: JSON.stringify(cached) }],
+        structuredContent: cached
+      };
     }
 
     console.log(`[Cache MISS] ${TOOL_NAME}`);
@@ -1123,7 +1252,10 @@ async function executeCheckActivityPulseTool(
     );
 
     // STEP 6: Return Result
-    return { content: [{ type: "text", text: JSON.stringify(secureResult) }] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(secureResult) }],
+      structuredContent: secureResult
+    };
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

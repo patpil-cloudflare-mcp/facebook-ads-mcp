@@ -49,12 +49,30 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
         // ========================================================================
         // Tool 1: analyzeCompetitorStrategy (5 tokens)
         // ========================================================================
-        this.server.tool(
+        this.server.registerTool(
             "analyzeCompetitorStrategy",
-            "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
             {
-                facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
-                max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
+                title: "Analyze Competitor Strategy",
+                description: "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
+                inputSchema: {
+                    facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
+                    max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
+                },
+                outputSchema: {
+                    format_statistics: z.object({
+                        total: z.number(),
+                        video_percentage: z.number(),
+                        image_percentage: z.number()
+                    }),
+                    marketing_hooks: z.object({
+                        hooks: z.array(z.string()).optional()
+                    }).optional(),
+                    metadata: z.object({
+                        page_name: z.string().optional(),
+                        analysis_date: z.string(),
+                        sample_size: z.number()
+                    }).optional()
+                }
             },
             async (params) => {
                 const actionId = crypto.randomUUID();
@@ -126,7 +144,10 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                             );
                         }
 
-                        return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+                        return {
+                            content: [{ type: "text", text: JSON.stringify(cached) }],
+                            structuredContent: cached
+                        };
                     }
 
                     console.log(`[Cache MISS] ${TOOL_NAME}`);
@@ -244,7 +265,8 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         content: [{
                             type: "text",
                             text: JSON.stringify(secureResult)
-                        }]
+                        }],
+                        structuredContent: secureResult
                     };
 
                 } catch (error) {
@@ -271,12 +293,30 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
         // ========================================================================
         // Tool 2: fetchCreativeGallery (3 tokens)
         // ========================================================================
-        this.server.tool(
+        this.server.registerTool(
             "fetchCreativeGallery",
-            "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
             {
-                facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
-                limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")
+                title: "Fetch Creative Gallery",
+                description: "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
+                inputSchema: {
+                    facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
+                    limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")
+                },
+                outputSchema: {
+                    creatives: z.array(z.object({
+                        type: z.string(),
+                        url: z.string().url().optional(),
+                        thumbnail_url: z.string().optional(),
+                        headline: z.string().optional(),
+                        body_text: z.string().optional(),
+                        cta: z.string().optional()
+                    })),
+                    metadata: z.object({
+                        total_count: z.number(),
+                        page_name: z.string(),
+                        fetch_date: z.string()
+                    }).optional()
+                }
             },
             async (params) => {
                 const actionId = crypto.randomUUID();
@@ -348,7 +388,10 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                             );
                         }
 
-                        return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+                        return {
+                            content: [{ type: "text", text: JSON.stringify(cached) }],
+                            structuredContent: cached
+                        };
                     }
 
                     console.log(`[Cache MISS] ${TOOL_NAME}`);
@@ -442,7 +485,8 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         content: [{
                             type: "text",
                             text: JSON.stringify(secureResult)
-                        }]
+                        }],
+                        structuredContent: secureResult
                     };
 
                 } catch (error) {
@@ -469,11 +513,20 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
         // ========================================================================
         // Tool 3: checkActivityPulse (1 token)
         // ========================================================================
-        this.server.tool(
+        this.server.registerTool(
             "checkActivityPulse",
-            "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
             {
-                facebook_page_url: z.string().describe("Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required.")
+                title: "Check Activity Pulse",
+                description: "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
+                inputSchema: {
+                    facebook_page_url: z.string().describe("Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required.")
+                },
+                outputSchema: {
+                    is_active: z.boolean(),
+                    total_ads: z.number(),
+                    page_name: z.string(),
+                    last_updated: z.string()
+                }
             },
             async (params) => {
                 const actionId = crypto.randomUUID();
@@ -545,7 +598,10 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                             );
                         }
 
-                        return { content: [{ type: "text", text: JSON.stringify(cached) }] };
+                        return {
+                            content: [{ type: "text", text: JSON.stringify(cached) }],
+                            structuredContent: cached
+                        };
                     }
 
                     console.log(`[Cache MISS] ${TOOL_NAME}`);
@@ -623,7 +679,8 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         content: [{
                             type: "text",
                             text: JSON.stringify(secureResult)
-                        }]
+                        }],
+                        structuredContent: secureResult
                     };
 
                 } catch (error) {
