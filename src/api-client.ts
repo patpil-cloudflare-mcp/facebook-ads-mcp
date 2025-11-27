@@ -77,9 +77,7 @@ export class ApiClient {
         this.env = env;
     }
 
-    // TODO: Add your custom methods here
-    // DO NOT add placeholder methods - they create coupling with skeleton tools
-    // Just implement your actual API methods when you're ready
+    // TODO: Add your custom API methods here
 }
 
 /**

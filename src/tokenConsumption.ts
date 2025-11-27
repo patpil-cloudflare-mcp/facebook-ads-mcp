@@ -233,7 +233,7 @@ export async function consumeTokens(
       return {
         success: true,
         newBalance: balanceResult?.current_token_balance ?? 0,
-        transactionId: 'existing', // Placeholder since we don't store transaction_id in mcp_actions
+        transactionId: 'existing',
         actionId: finalActionId,
         alreadyProcessed: true
       };

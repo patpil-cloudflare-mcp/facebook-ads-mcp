@@ -45,8 +45,8 @@ const oauthProvider = new OAuthProvider({
     // Dual transport support (SSE + Streamable HTTP)
     // This ensures compatibility with all MCP clients (Claude, ChatGPT, etc.)
     apiHandlers: {
-        '/sse': FacebookAdsMCP.serveSSE('/sse'),  // Legacy SSE transport
-        '/mcp': FacebookAdsMCP.serve('/mcp'),     // New Streamable HTTP transport
+        '/sse': FacebookAdsMCP.serveSSE('/sse'),
+        '/mcp': FacebookAdsMCP.serve('/mcp'),
     },
 
     // OAuth authentication handler (WorkOS AuthKit integration)
