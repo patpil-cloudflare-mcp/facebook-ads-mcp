@@ -7,6 +7,86 @@ import type { Props } from "./props";
 import { getUserByEmail, formatPurchaseRequiredPage, formatAccountDeletedPage, formatOAuthSuccessPage } from "./tokenUtils";
 
 /**
+ * ============================================================
+ * PKCE (Proof Key for Code Exchange) - OAuth 2.1 Requirement
+ * ============================================================
+ * Reference: https://workos.com/blog/oauth-2-1-changes
+ * RFC 7636: https://datatracker.ietf.org/doc/html/rfc7636
+ *
+ * PKCE prevents authorization code interception attacks by binding
+ * the authorization request to the token exchange request using
+ * cryptographic proof.
+ */
+
+/**
+ * Generate cryptographically secure code_verifier
+ * OAuth 2.1: 43-128 characters, base64url-encoded random string
+ */
+function generateCodeVerifier(): string {
+    const array = new Uint8Array(32); // 32 bytes = 256 bits entropy
+    crypto.getRandomValues(array); // Cryptographically secure random
+    return base64UrlEncode(array);
+}
+
+/**
+ * Generate code_challenge from code_verifier
+ * OAuth 2.1: SHA-256 hash, base64url-encoded
+ */
+async function generateCodeChallenge(verifier: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return base64UrlEncode(new Uint8Array(hashBuffer));
+}
+
+/**
+ * Base64-URL encode (RFC 7636)
+ * Standard base64 with: + → -, / → _, remove padding =
+ */
+function base64UrlEncode(buffer: Uint8Array): string {
+    // ES5-compatible (no spread operator for Workers compatibility)
+    let binaryString = '';
+    for (let i = 0; i < buffer.length; i++) {
+        binaryString += String.fromCharCode(buffer[i]);
+    }
+    const base64 = btoa(binaryString);
+    return base64
+        .replace(/\+/g, '-')  // Replace + with -
+        .replace(/\//g, '_')  // Replace / with _
+        .replace(/=/g, '');   // Remove padding
+}
+
+/**
+ * Store code_verifier in KV with 10-minute expiration
+ * OAuth 2.1: Short TTL matches authorization code lifetime
+ */
+async function storeCodeVerifier(env: Env, state: string, verifier: string): Promise<void> {
+    if (!env.USER_SESSIONS) {
+        console.warn('⚠️ [PKCE] USER_SESSIONS KV not configured - PKCE disabled');
+        return;
+    }
+    await env.USER_SESSIONS.put(`pkce:${state}`, verifier, {
+        expirationTtl: 600  // 10 minutes (OAuth 2.1 requirement)
+    });
+}
+
+/**
+ * Retrieve and delete code_verifier (one-time use)
+ * Security: Prevents replay attacks
+ */
+async function getCodeVerifier(env: Env, state: string): Promise<string | null> {
+    if (!env.USER_SESSIONS) {
+        console.warn('⚠️ [PKCE] USER_SESSIONS KV not configured - PKCE disabled');
+        return null;
+    }
+    const verifier = await env.USER_SESSIONS.get(`pkce:${state}`);
+    if (verifier) {
+        await env.USER_SESSIONS.delete(`pkce:${state}`); // One-time use
+    }
+    return verifier;
+}
+
+/**
  * Authentication handler for WorkOS AuthKit integration
  *
  * This is the DEFAULT authentication implementation using WorkOS-hosted UI.
@@ -187,12 +267,24 @@ app.get("/authorize", async (c) => {
     // STEP 6: Fallback to WorkOS (if USER_SESSIONS not configured)
     // ============================================================
     console.log('⚠️ [OAuth] No session handling - falling back to WorkOS');
+
+    // OAuth 2.1: Generate PKCE parameters
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+    const state = btoa(JSON.stringify(oauthReqInfo));
+
+    // Store code_verifier for later token exchange (10-minute TTL)
+    await storeCodeVerifier(c.env, state, codeVerifier);
+    console.log('✅ [PKCE] Code verifier generated and stored');
+
     return Response.redirect(
         c.get("workOS").userManagement.getAuthorizationUrl({
             provider: "authkit",
             clientId: c.env.WORKOS_CLIENT_ID,
             redirectUri: new URL("/callback", c.req.url).href,
-            state: btoa(JSON.stringify(oauthReqInfo)),
+            state,
+            codeChallenge,                    // OAuth 2.1: PKCE challenge
+            codeChallengeMethod: 'S256',      // OAuth 2.1: SHA-256 method
         }),
     );
 });
@@ -209,7 +301,8 @@ app.get("/callback", async (c) => {
     const workOS = c.get("workOS");
 
     // Decode the OAuth request info from state parameter
-    const oauthReqInfo = JSON.parse(atob(c.req.query("state") as string)) as AuthRequest;
+    const state = c.req.query("state") as string;
+    const oauthReqInfo = JSON.parse(atob(state)) as AuthRequest;
     if (!oauthReqInfo.clientId) {
         return c.text("Invalid state", 400);
     }
@@ -220,16 +313,27 @@ app.get("/callback", async (c) => {
         return c.text("Missing code", 400);
     }
 
-    // Exchange authorization code for tokens and user info
+    // OAuth 2.1: Retrieve code_verifier from KV
+    const codeVerifier = await getCodeVerifier(c.env, state);
+
+    if (!codeVerifier) {
+        console.error("[PKCE] Code verifier not found or expired");
+        return c.text("Invalid or expired PKCE verification", 400);
+    }
+    console.log('✅ [PKCE] Code verifier retrieved');
+
+    // Exchange authorization code for tokens and user info (with PKCE)
     let response: AuthenticationResponse;
     try {
         response = await workOS.userManagement.authenticateWithCode({
             clientId: c.env.WORKOS_CLIENT_ID,
             code,
+            codeVerifier,  // OAuth 2.1: PKCE verification
         });
+        console.log('✅ [PKCE] Code verifier validated by WorkOS');
     } catch (error) {
         console.error("[MCP OAuth] Authentication error:", error);
-        return c.text("Invalid authorization code", 400);
+        return c.text("Invalid authorization code or PKCE verification failed", 400);
     }
 
     // Extract authentication data
