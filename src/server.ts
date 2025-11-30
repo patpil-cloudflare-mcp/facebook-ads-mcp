@@ -305,7 +305,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                 outputSchema: {
                     creatives: z.array(z.object({
                         type: z.string(),
-                        url: z.string().url().optional(),
+                        url: z.url().optional(),
                         thumbnail_url: z.string().optional(),
                         headline: z.string().optional(),
                         body_text: z.string().optional(),
