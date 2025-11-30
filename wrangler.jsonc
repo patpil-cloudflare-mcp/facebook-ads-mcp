@@ -29,6 +29,16 @@
   "compatibility_flags": ["nodejs_compat"],
 
   /**
+   * REQUIRED: Build command for GitHub → Cloudflare deployment
+   *
+   * Cloudflare Workers Builds runs in clean environment without node_modules/.
+   * This ensures dependencies install and TypeScript validates before deploy.
+   */
+  "build": {
+    "command": "npm install && npx tsc --noEmit"
+  },
+
+  /**
    * CRITICAL: Migrations for Durable Objects
    *
    * FacebookAdsMCP: Required for MCP protocol handling, WebSocket management, and session state.
