@@ -16,7 +16,7 @@ import { makeAIGatewayRequest, formatAIGatewayError } from "./ai-gateway";
  * Skeleton MCP Server with Token Integration
  *
  * This server demonstrates the complete token-based authentication pattern
- * with three example tools showing different token costs (1, 2, 3 tokens).
+ * demonstrating the complete authentication pattern.
  *
  * Generic type parameters:
  * - Env: Cloudflare Workers environment bindings (KV, D1, WorkOS credentials, etc.)
@@ -51,7 +51,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
             "analyzeCompetitorStrategy",
             {
                 title: "Analyze Competitor Strategy",
-                description: "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
                 inputSchema: {
                     facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
                     max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
@@ -253,7 +252,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
             "fetchCreativeGallery",
             {
                 title: "Fetch Creative Gallery",
-                description: "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
                 inputSchema: {
                     facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
                     limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")

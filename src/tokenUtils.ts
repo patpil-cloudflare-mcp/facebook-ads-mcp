@@ -129,8 +129,8 @@ export async function logToolUsage(
         await db.prepare(`
             INSERT INTO mcp_actions (
                 action_id, user_id, mcp_server_name, tool_name,
-                parameters, tokens_consumed, success, created_at
-            ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+                parameters, success, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `).bind(
             actionId,
             userId,
