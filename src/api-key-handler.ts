@@ -20,14 +20,11 @@
  */
 
 import { validateApiKey } from "./apiKeys";
-import { getUserById } from "./tokenUtils";
+import { getUserById, logToolUsage } from "./tokenUtils";
 import type { Env, ResponseFormat, SemaphoreSlot } from "./types";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { ApiClient } from "./api-client";
-import { checkBalance, consumeTokensWithRetry } from "./tokenConsumption";
-import { formatInsufficientTokensError, formatAccountDeletedError } from "./tokenUtils";
-import { sanitizeOutput, redactPII, validateOutput } from 'pilpat-mcp-security';
 import { ApifyClient } from "./apify-client";
 import { getCachedApifyResult, setCachedApifyResult, hashApifyInput } from "./apify-cache";
 import { makeAIGatewayRequest, formatAIGatewayError } from "./ai-gateway";
@@ -208,7 +205,7 @@ export async function handleApiKeyRequest(
     }
 
     console.log(
-      `✅ [API Key Auth] Authenticated user: ${dbUser.email} (${userId}), balance: ${dbUser.current_token_balance} tokens`
+      `✅ [API Key Auth] Authenticated user: ${dbUser.email} (${userId})`
     );
 
     // 4. Create or get cached MCP server with tools
@@ -286,15 +283,13 @@ async function getOrCreateServer(
   // Tools will be generated here by the automated boilerplate generator
   // Usage: npm run generate-tool --prp PRPs/your-prp.md --tool-id your_tool --output snippets
   //
-  // Or implement tools manually following the 7-Step Token Pattern:
+  // Or implement tools manually following the Usage Logging Pattern:
   // Step 0: Generate actionId for idempotency
   // Step 1: userId parameter is already available in this function scope
-  // Step 2: Check token balance with checkBalance(env.TOKEN_DB, userId, TOOL_COST)
-  // Step 3: Handle insufficient balance and deleted users
-  // Step 4: Execute business logic
-  // Step 4.5: Apply security (sanitizeOutput + redactPII)
-  // Step 5: Consume tokens with consumeTokensWithRetry()
-  // Step 6: Return result
+  // Step 2: Check cache (CACHE-BEFORE-SEMAPHORE)
+  // Step 3: Execute business logic (Apify actor, API calls, etc.)
+  // Step 4: Log usage with logToolUsage()
+  // Step 5: Return result
   //
   // Tool Description Best Practices (CRITICAL):
   // MUST match descriptions in server.ts exactly (dual-auth consistency).
@@ -790,21 +785,7 @@ async function executeAnalyzeCompetitorStrategyTool(
       throw new Error("Invalid Facebook Page URL. Must start with https://facebook.com/");
     }
 
-    // STEP 2: Check Balance
-    const balanceCheck = await checkBalance(env.TOKEN_DB, userId, FLAT_COST);
-
-    // STEP 3: Handle Insufficient Balance
-    if (!balanceCheck.sufficient) {
-      return {
-        content: [{
-          type: "text",
-          text: formatInsufficientTokensError(TOOL_NAME, balanceCheck.currentBalance, FLAT_COST)
-        }],
-        isError: true
-      };
-    }
-
-    // STEP 3.5: Check Cache
+    // STEP 2: Check Cache
     const actorInput = {
       startUrls: [{ url: args.facebook_page_url }],
       resultsLimit: args.max_ads_to_analyze || 10,
@@ -818,19 +799,16 @@ async function executeAnalyzeCompetitorStrategyTool(
 
     if (cached) {
       console.log(`[Cache HIT] ${TOOL_NAME}`);
-      if (FLAT_COST > 0) {
-        await consumeTokensWithRetry(
-          env.TOKEN_DB,
-          userId,
-          FLAT_COST,
-          "facebook-ads-mcp",
-          TOOL_NAME,
-          args,
-          cached,
-          true,
-          actionId
-        );
-      }
+      await logToolUsage(
+        env.TOKEN_DB,
+        userId,
+        "facebook-ads-mcp",
+        TOOL_NAME,
+        args,
+        cached,
+        true,
+        actionId
+      );
       return {
         content: [{ type: "text", text: JSON.stringify(cached) }],
         structuredContent: cached
@@ -897,47 +875,25 @@ async function executeAnalyzeCompetitorStrategyTool(
       }
     };
 
-    // STEP 4.5: Apply Security
-    const sanitized = sanitizeOutput(JSON.stringify(finalResult), {
-      maxLength: 10000,
-      removeHtml: true,
-      removeControlChars: true,
-      normalizeWhitespace: true
-    });
-    const redacted = redactPII(sanitized, {
-      redactEmails: false,
-      redactPhones: false,
-      redactCreditCards: true,
-      redactSSN: true,
-      redactBankAccounts: true,
-      redactPESEL: true,
-      redactPolishIdCard: true,
-      redactPolishPassport: true,
-      redactPolishPhones: false
-    });
-    const secureResult = JSON.parse(redacted.redacted);
-
     // Cache result
-    await setCachedApifyResult(env.APIFY_CACHE, ACTOR_ID, cacheKey, secureResult, CACHE_TTL);
+    await setCachedApifyResult(env.APIFY_CACHE, ACTOR_ID, cacheKey, finalResult, CACHE_TTL);
 
-    // STEP 5: Consume Tokens
-    const actualCost = rawAds.length > 0 ? FLAT_COST : 1;
-    await consumeTokensWithRetry(
+    // STEP 4: Log Usage
+    await logToolUsage(
       env.TOKEN_DB,
       userId,
-      actualCost,
       "facebook-ads-mcp",
       TOOL_NAME,
       args,
-      secureResult,
+      finalResult,
       false,
       actionId
     );
 
-    // STEP 6: Return Result
+    // STEP 5: Return Result
     return {
-      content: [{ type: "text", text: JSON.stringify(secureResult) }],
-      structuredContent: secureResult
+      content: [{ type: "text", text: JSON.stringify(finalResult) }],
+      structuredContent: finalResult
     };
 
   } catch (error) {
@@ -980,21 +936,7 @@ async function executeFetchCreativeGalleryTool(
       throw new Error("Invalid Facebook Page URL. Must start with https://facebook.com/");
     }
 
-    // STEP 2: Check Balance
-    const balanceCheck = await checkBalance(env.TOKEN_DB, userId, FLAT_COST);
-
-    // STEP 3: Handle Insufficient Balance
-    if (!balanceCheck.sufficient) {
-      return {
-        content: [{
-          type: "text",
-          text: formatInsufficientTokensError(TOOL_NAME, balanceCheck.currentBalance, FLAT_COST)
-        }],
-        isError: true
-      };
-    }
-
-    // STEP 3.5: Check Cache
+    // STEP 2: Check Cache
     const actorInput = {
       startUrls: [{ url: args.facebook_page_url }],
       resultsLimit: args.limit || 10,
@@ -1008,19 +950,16 @@ async function executeFetchCreativeGalleryTool(
 
     if (cached) {
       console.log(`[Cache HIT] ${TOOL_NAME}`);
-      if (FLAT_COST > 0) {
-        await consumeTokensWithRetry(
-          env.TOKEN_DB,
-          userId,
-          FLAT_COST,
-          "facebook-ads-mcp",
-          TOOL_NAME,
-          args,
-          cached,
-          true,
-          actionId
-        );
-      }
+      await logToolUsage(
+        env.TOKEN_DB,
+        userId,
+        "facebook-ads-mcp",
+        TOOL_NAME,
+        args,
+        cached,
+        true,
+        actionId
+      );
       return {
         content: [{ type: "text", text: JSON.stringify(cached) }],
         structuredContent: cached
@@ -1063,47 +1002,25 @@ async function executeFetchCreativeGalleryTool(
       }
     };
 
-    // STEP 4.5: Apply Security
-    const sanitized = sanitizeOutput(JSON.stringify(finalResult), {
-      maxLength: 10000,
-      removeHtml: true,
-      removeControlChars: true,
-      normalizeWhitespace: true
-    });
-    const redacted = redactPII(sanitized, {
-      redactEmails: false,
-      redactPhones: false,
-      redactCreditCards: true,
-      redactSSN: true,
-      redactBankAccounts: true,
-      redactPESEL: true,
-      redactPolishIdCard: true,
-      redactPolishPassport: true,
-      redactPolishPhones: false
-    });
-    const secureResult = JSON.parse(redacted.redacted);
-
     // Cache result
-    await setCachedApifyResult(env.APIFY_CACHE, ACTOR_ID, cacheKey, secureResult, CACHE_TTL);
+    await setCachedApifyResult(env.APIFY_CACHE, ACTOR_ID, cacheKey, finalResult, CACHE_TTL);
 
-    // STEP 5: Consume Tokens
-    const actualCost = creatives.length > 0 ? FLAT_COST : 1;
-    await consumeTokensWithRetry(
+    // STEP 4: Log Usage
+    await logToolUsage(
       env.TOKEN_DB,
       userId,
-      actualCost,
       "facebook-ads-mcp",
       TOOL_NAME,
       args,
-      secureResult,
+      finalResult,
       false,
       actionId
     );
 
-    // STEP 6: Return Result
+    // STEP 5: Return Result
     return {
-      content: [{ type: "text", text: JSON.stringify(secureResult) }],
-      structuredContent: secureResult
+      content: [{ type: "text", text: JSON.stringify(finalResult) }],
+      structuredContent: finalResult
     };
 
   } catch (error) {
@@ -1146,21 +1063,7 @@ async function executeCheckActivityPulseTool(
       throw new Error("Invalid Facebook Page URL. Must start with https://facebook.com/");
     }
 
-    // STEP 2: Check Balance
-    const balanceCheck = await checkBalance(env.TOKEN_DB, userId, FLAT_COST);
-
-    // STEP 3: Handle Insufficient Balance
-    if (!balanceCheck.sufficient) {
-      return {
-        content: [{
-          type: "text",
-          text: formatInsufficientTokensError(TOOL_NAME, balanceCheck.currentBalance, FLAT_COST)
-        }],
-        isError: true
-      };
-    }
-
-    // STEP 3.5: Check Cache
+    // STEP 2: Check Cache
     const actorInput = {
       startUrls: [{ url: args.facebook_page_url }],
       resultsLimit: 1,
@@ -1174,19 +1077,16 @@ async function executeCheckActivityPulseTool(
 
     if (cached) {
       console.log(`[Cache HIT] ${TOOL_NAME}`);
-      if (FLAT_COST > 0) {
-        await consumeTokensWithRetry(
-          env.TOKEN_DB,
-          userId,
-          FLAT_COST,
-          "facebook-ads-mcp",
-          TOOL_NAME,
-          args,
-          cached,
-          true,
-          actionId
-        );
-      }
+      await logToolUsage(
+        env.TOKEN_DB,
+        userId,
+        "facebook-ads-mcp",
+        TOOL_NAME,
+        args,
+        cached,
+        true,
+        actionId
+      );
       return {
         content: [{ type: "text", text: JSON.stringify(cached) }],
         structuredContent: cached
@@ -1214,47 +1114,25 @@ async function executeCheckActivityPulseTool(
       last_updated: new Date().toISOString()
     };
 
-    // STEP 4.5: Apply Security
-    const sanitized = sanitizeOutput(JSON.stringify(finalResult), {
-      maxLength: 1000,
-      removeHtml: true,
-      removeControlChars: true,
-      normalizeWhitespace: true
-    });
-    const redacted = redactPII(sanitized, {
-      redactEmails: false,
-      redactPhones: false,
-      redactCreditCards: true,
-      redactSSN: true,
-      redactBankAccounts: true,
-      redactPESEL: true,
-      redactPolishIdCard: true,
-      redactPolishPassport: true,
-      redactPolishPhones: false
-    });
-    const secureResult = JSON.parse(redacted.redacted);
-
     // Cache result
-    await setCachedApifyResult(env.APIFY_CACHE, ACTOR_ID, cacheKey, secureResult, CACHE_TTL);
+    await setCachedApifyResult(env.APIFY_CACHE, ACTOR_ID, cacheKey, finalResult, CACHE_TTL);
 
-    // STEP 5: Consume Tokens
-    const actualCost = FLAT_COST;
-    await consumeTokensWithRetry(
+    // STEP 4: Log Usage
+    await logToolUsage(
       env.TOKEN_DB,
       userId,
-      actualCost,
       "facebook-ads-mcp",
       TOOL_NAME,
       args,
-      secureResult,
+      finalResult,
       false,
       actionId
     );
 
-    // STEP 6: Return Result
+    // STEP 5: Return Result
     return {
-      content: [{ type: "text", text: JSON.stringify(secureResult) }],
-      structuredContent: secureResult
+      content: [{ type: "text", text: JSON.stringify(finalResult) }],
+      structuredContent: finalResult
     };
 
   } catch (error) {

@@ -4,7 +4,7 @@ import * as jose from "jose";
 import { type AccessToken, type AuthenticationResponse, WorkOS } from "@workos-inc/node";
 import type { Env } from "./types";
 import type { Props } from "./props";
-import { getUserByEmail, formatPurchaseRequiredPage, formatAccountDeletedPage, formatOAuthSuccessPage } from "./tokenUtils";
+import { getUserByEmail, formatOAuthSuccessPage } from "./tokenUtils";
 
 /**
  * ============================================================
@@ -106,11 +106,9 @@ async function getCodeVerifier(env: Env, state: string): Promise<string | null> 
  * 4. User enters code → WorkOS validates
  * 5. Callback to /callback with authorization code
  * 6. Exchange code for tokens and user info
- * 7. Check if user exists in token database
- * 8. IF NOT in database → 403 error page with purchase link
+ * 7. Check if user exists in database
+ * 8. IF NOT in database → 403 error with message
  * 9. IF in database → Complete OAuth and redirect back to MCP client
- *
- * TODO: Customize the server name in formatPurchaseRequiredPage if needed
  */
 const app = new Hono<{
     Bindings: Env & { OAUTH_PROVIDER: OAuthHelpers };
@@ -188,18 +186,64 @@ app.get("/authorize", async (c) => {
             return Response.redirect(loginUrl.toString(), 302);
         }
 
-        const session = sessionData as {
+        let session = sessionData as {
             expires_at: number;
             user_id: string;
-            email: string
+            email: string;
+            workos_user_id: string;
+            access_token: string;
+            refresh_token: string;
+            created_at: number;
         };
 
-        // Check expiration
+        // Check expiration and attempt auto-refresh
         if (session.expires_at < Date.now()) {
-            console.log('🔐 [OAuth] Session expired, redirecting to centralized custom login');
-            const loginUrl = new URL('https://panel.wtyczki.ai/auth/login-custom');
-            loginUrl.searchParams.set('return_to', c.req.url);
-            return Response.redirect(loginUrl.toString(), 302);
+            console.log('🔐 [OAuth] Session expired, attempting auto-refresh');
+
+            // Try to refresh using WorkOS
+            if (session.refresh_token) {
+                try {
+                    const newAuth = await c.get("workOS").userManagement.authenticateWithRefreshToken({
+                        clientId: c.env.WORKOS_CLIENT_ID,
+                        refreshToken: session.refresh_token,
+                    });
+
+                    // Create updated session
+                    const newSession = {
+                        user_id: session.user_id,
+                        email: session.email,
+                        workos_user_id: session.workos_user_id,
+                        access_token: newAuth.accessToken,
+                        refresh_token: newAuth.refreshToken,
+                        created_at: session.created_at,
+                        expires_at: Date.now() + (72 * 60 * 60 * 1000), // 72 hours
+                    };
+
+                    // Update USER_SESSIONS KV
+                    await c.env.USER_SESSIONS.put(
+                        `workos_session:${sessionToken}`,
+                        JSON.stringify(newSession),
+                        { expirationTtl: 259200 } // 72 hours
+                    );
+
+                    console.log('✅ [OAuth] Session refreshed successfully');
+                    // Update local session reference
+                    session = newSession;
+
+                } catch (error) {
+                    console.error('❌ [OAuth] Auto-refresh failed:', error);
+                    // Fall back to re-authentication
+                    const loginUrl = new URL('https://panel.wtyczki.ai/auth/login-custom');
+                    loginUrl.searchParams.set('return_to', c.req.url);
+                    return Response.redirect(loginUrl.toString(), 302);
+                }
+            } else {
+                // No refresh_token available, must re-authenticate
+                console.log('🔐 [OAuth] No refresh token, redirecting to login');
+                const loginUrl = new URL('https://panel.wtyczki.ai/auth/login-custom');
+                loginUrl.searchParams.set('return_to', c.req.url);
+                return Response.redirect(loginUrl.toString(), 302);
+            }
         }
 
         // ============================================================
@@ -212,12 +256,12 @@ app.get("/authorize", async (c) => {
 
         if (!dbUser) {
             console.log(`❌ [OAuth] User not found in database: ${session.email}`);
-            return c.html(formatPurchaseRequiredPage(session.email), 403);
+            return c.text(`Access denied. User ${session.email} is not registered.`, 403);
         }
 
         if (dbUser.is_deleted === 1) {
             console.log(`❌ [OAuth] Account deleted: ${session.email}`);
-            return c.html(formatAccountDeletedPage(), 403);
+            return c.text("Access denied. Account has been deleted.", 403);
         }
 
         // ============================================================
@@ -346,20 +390,19 @@ app.get("/callback", async (c) => {
     console.log(`[MCP OAuth] Checking if user exists in database: ${user.email}`);
     const dbUser = await getUserByEmail(c.env.TOKEN_DB, user.email);
 
-    // If user not found in database, reject authorization and show purchase page
+    // If user not found in database, reject authorization
     if (!dbUser) {
-        console.log(`[MCP OAuth] ❌ User not found in database: ${user.email} - Tokens required`);
-        return c.html(formatPurchaseRequiredPage(user.email), 403);
+        console.log(`[MCP OAuth] ❌ User not found in database: ${user.email}`);
+        return c.text(`Access denied. User ${user.email} is not registered.`, 403);
     }
 
     // SECURITY FIX: Defensive check for deleted accounts (belt-and-suspenders approach)
     // This provides defense-in-depth even if getUserByEmail() query is modified
     if (dbUser.is_deleted === 1) {
         console.log(`[MCP OAuth] ❌ Account deleted: ${user.email} (user_id: ${dbUser.user_id})`);
-        return c.html(formatAccountDeletedPage(), 403);
+        return c.text("Access denied. Account has been deleted.", 403);
     }
 
-    console.log(`[MCP OAuth] ✅ User found in database: ${dbUser.user_id}, balance: ${dbUser.current_token_balance} tokens`);
 
     // Complete OAuth flow and get redirect URL back to MCP client
     const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({

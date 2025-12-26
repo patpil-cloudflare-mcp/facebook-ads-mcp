@@ -285,8 +285,8 @@ redactPolishPhones: false // Business phones in ads are public
 ### D1 Database (Shared)
 
 **Binding**: TOKEN_DB
-**Database ID**: ebb389aa-2d65-4d38-a0da-50c7da9dfe8b
-**Database Name**: mcp-tokens-database
+**Database ID**: eac93639-d58e-4777-82e9-f1e28113d5b2
+**Database Name**: mcp-oauth
 
 ### Workers AI
 
@@ -309,8 +309,11 @@ redactPolishPhones: false // Business phones in ads are public
 
 ### Authentication
 
-**Dual Transport**: OAuth + API Keys
-- OAuth Path: `/sse` endpoint (WorkOS Magic Auth)
+**Dual Transport**: OAuth 2.1 + API Keys
+- OAuth Path: `/sse` endpoint (WorkOS Magic Auth with PKCE - OAuth 2.1)
+  - PKCE enabled with SHA-256 code challenge
+  - 10-minute code verifier TTL
+  - One-time use authorization codes
 - API Key Path: `/mcp` endpoint (Bearer token)
 
 ### Caching Strategy
@@ -428,14 +431,14 @@ redactPolishPhones: false // Business phones in ads are public
 ### Dependencies
 
 **Production**:
-- @modelcontextprotocol/sdk: ^1.18.2
+- @modelcontextprotocol/sdk: ^1.23.0 (with Zod v4 support and JSON Schema auto-conversion)
 - @cloudflare/workers-oauth-provider: ^0.0.11
 - @workos-inc/node: ^7.70.0
 - agents: ^0.2.4 (McpAgent framework)
 - hono: ^4.10.3 (HTTP routing)
 - jose: ^6.1.0 (JWT handling)
 - pilpat-mcp-security: ^1.1.0 (PII redaction)
-- zod: ^3.25.76 (schema validation)
+- zod: ^4.1.13 (schema validation with v4 patterns)
 
 **Development**:
 - @cloudflare/workers-types: ^4.20250101.0

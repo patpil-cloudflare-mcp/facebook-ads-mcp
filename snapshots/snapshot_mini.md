@@ -71,6 +71,6 @@ Note: The server name ("facebook-ads") is a local identifier - change it to what
 - Two-DO architecture: FacebookAdsMCP (per-user MCP handling) + ApifySemaphore (global 32-slot concurrency)
 - AI Gateway integration: Routes AI requests for caching (1-hour TTL), rate limiting (50 req/min), logging
 - Tiered pricing: 5/3/1 tokens reflecting analysis depth (AI-enhanced vs raw data vs quick check)
-- Dual authentication: OAuth (server.ts) and API key (api-key-handler.ts) paths both fully implemented
+- Dual authentication: OAuth 2.1 with PKCE (server.ts) and API key (api-key-handler.ts) paths both fully implemented
 - Security: Step 4.5 implemented in all 6 tool paths (3 OAuth + 3 API key)
 - URL validation: Regex pattern validation for Facebook URLs before Actor execution

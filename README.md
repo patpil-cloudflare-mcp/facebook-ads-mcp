@@ -611,8 +611,8 @@ When customizing, search for `// TODO:` comments in:
 ## Database Configuration
 
 **Shared D1 Database:**
-- **ID:** `ebb389aa-2d65-4d38-a0da-50c7da9dfe8b`
-- **Name:** `mcp-tokens-database`
+- **ID:** `eac93639-d58e-4777-82e9-f1e28113d5b2`
+- **Name:** `mcp-oauth`
 - **DO NOT CHANGE** - Must be the same across all MCP servers
 
 ## Support

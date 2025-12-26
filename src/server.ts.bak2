@@ -1,11 +1,10 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import * as z from "zod/v4";
 import { ApiClient } from "./api-client";
 import type { Env, SemaphoreSlot } from "./types";
 import { ResponseFormat } from "./types";
 import type { Props } from "./props";
-import { logToolUsage } from "./tokenUtils";
 import { ApifyClient } from "./apify-client";
 import { getCachedApifyResult, setCachedApifyResult, hashApifyInput } from "./apify-cache";
 import { makeAIGatewayRequest, formatAIGatewayError } from "./ai-gateway";
@@ -53,8 +52,8 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                 title: "Analyze Competitor Strategy",
                 description: "Analyze competitor Facebook ad creative strategy to identify format preferences and effective marketing hooks. Returns format statistics (video vs image percentage) and AI-synthesized marketing angles. Use this when you need to understand how a competitor structures their ad campaigns and what messaging resonates. ⚠️ This tool costs 5 tokens per use.",
                 inputSchema: {
-                    facebook_page_url: z.string().describe("Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
-                    max_ads_to_analyze: z.number().optional().describe("Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time.")
+                    facebook_page_url: z.string().meta({ description: "Facebook Page URL to analyze (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required." }),
+                    max_ads_to_analyze: z.number().optional().meta({ description: "Number of active ads to analyze (1-50). Default: 10. Higher values provide broader strategy insights but increase processing time." })
                 },
                 outputSchema: {
                     format_statistics: z.object({
@@ -75,7 +74,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
             async (params) => {
                 const actionId = crypto.randomUUID();
                 const ACTOR_ID = "apify/facebook-ads-scraper";
-                const FLAT_COST = 5;
                 const TOOL_NAME = "analyzeCompetitorStrategy";
                 const TIMEOUT = 120;
                 const CACHE_TTL = 21600; // 6 hours
@@ -112,18 +110,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
                     if (cached) {
                         console.log(`[Cache HIT] ${TOOL_NAME}`);
-
-                        await logToolUsage(
-                            this.env.TOKEN_DB,
-                            userId,
-                            "facebook-ads-mcp",
-                            TOOL_NAME,
-                            params,
-                            cached,
-                            true,
-                            actionId
-                        );
-
                         return {
                             content: [{ type: "text", text: JSON.stringify(cached) }],
                             structuredContent: cached
@@ -204,19 +190,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         CACHE_TTL
                     );
 
-                    // STEP 4: Log Usage
-                    await logToolUsage(
-                        this.env.TOKEN_DB,
-                        userId,
-                        "facebook-ads-mcp",
-                        TOOL_NAME,
-                        params,
-                        finalResult,
-                        false,
-                        actionId
-                    );
-
-                    // STEP 5: Return Result
+                    // Return Result
                     return {
                         content: [{
                             type: "text",
@@ -255,8 +229,8 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                 title: "Fetch Creative Gallery",
                 description: "Fetch direct URLs to ad images and video thumbnails for visual inspiration. Returns curated list of creative assets with metadata. Use this when you need visual examples of a competitor's ad creatives. ⚠️ This tool costs 3 tokens per use.",
                 inputSchema: {
-                    facebook_page_url: z.string().describe("Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required."),
-                    limit: z.number().optional().describe("Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context.")
+                    facebook_page_url: z.string().meta({ description: "Facebook Page URL to fetch creatives from (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required." }),
+                    limit: z.number().optional().meta({ description: "Number of creative assets to return (1-30). Default: 10. Controls gallery size and response context." })
                 },
                 outputSchema: {
                     creatives: z.array(z.object({
@@ -277,7 +251,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
             async (params) => {
                 const actionId = crypto.randomUUID();
                 const ACTOR_ID = "apify/facebook-ads-scraper";
-                const FLAT_COST = 3;
                 const TOOL_NAME = "fetchCreativeGallery";
                 const TIMEOUT = 120;
                 const CACHE_TTL = 21600; // 6 hours
@@ -314,18 +287,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
                     if (cached) {
                         console.log(`[Cache HIT] ${TOOL_NAME}`);
-
-                        await logToolUsage(
-                            this.env.TOKEN_DB,
-                            userId,
-                            "facebook-ads-mcp",
-                            TOOL_NAME,
-                            params,
-                            cached,
-                            true,
-                            actionId
-                        );
-
                         return {
                             content: [{ type: "text", text: JSON.stringify(cached) }],
                             structuredContent: cached
@@ -382,10 +343,12 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         CACHE_TTL
                     );
 
-                    // STEP 4: Log Usage
-                    await logToolUsage(
+                    // STEP 5: Consume Tokens (Flat Pricing)
+                    
+                    await consumeTokensWithRetry(
                         this.env.TOKEN_DB,
                         userId,
+                        actualCost,
                         "facebook-ads-mcp",
                         TOOL_NAME,
                         params,
@@ -394,7 +357,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         actionId
                     );
 
-                    // STEP 5: Return Result
+                    // STEP 6: Return Result
                     return {
                         content: [{
                             type: "text",
@@ -433,7 +396,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                 title: "Check Activity Pulse",
                 description: "Quick check to see if a brand is currently running Facebook ads and how many. Returns activity status and total ad count. Use this for initial reconnaissance before deeper analysis. ⚠️ This tool costs 1 token per use.",
                 inputSchema: {
-                    facebook_page_url: z.string().describe("Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required.")
+                    facebook_page_url: z.string().meta({ description: "Facebook Page URL to check activity for (e.g., 'https://www.facebook.com/Nike'). Must be a valid Facebook Page URL. Required." })
                 },
                 outputSchema: {
                     is_active: z.boolean(),
@@ -445,7 +408,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
             async (params) => {
                 const actionId = crypto.randomUUID();
                 const ACTOR_ID = "apify/facebook-ads-scraper";
-                const FLAT_COST = 1;
                 const TOOL_NAME = "checkActivityPulse";
                 const TIMEOUT = 60;
                 const CACHE_TTL = 21600; // 6 hours
@@ -482,18 +444,6 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
                     if (cached) {
                         console.log(`[Cache HIT] ${TOOL_NAME}`);
-
-                        await logToolUsage(
-                            this.env.TOKEN_DB,
-                            userId,
-                            "facebook-ads-mcp",
-                            TOOL_NAME,
-                            params,
-                            cached,
-                            true,
-                            actionId
-                        );
-
                         return {
                             content: [{ type: "text", text: JSON.stringify(cached) }],
                             structuredContent: cached
@@ -534,10 +484,12 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         CACHE_TTL
                     );
 
-                    // STEP 4: Log Usage
-                    await logToolUsage(
+                    // STEP 5: Consume Tokens (Flat Pricing)
+                    const actualCost = FLAT_COST;
+                    await consumeTokensWithRetry(
                         this.env.TOKEN_DB,
                         userId,
+                        actualCost,
                         "facebook-ads-mcp",
                         TOOL_NAME,
                         params,
@@ -546,7 +498,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         actionId
                     );
 
-                    // STEP 5: Return Result
+                    // STEP 6: Return Result
                     return {
                         content: [{
                             type: "text",
