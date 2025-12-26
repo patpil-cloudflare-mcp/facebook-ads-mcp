@@ -196,7 +196,7 @@ export async function handleApiKeyRequest(
     }
 
     // 3. Get user from database
-    const dbUser = await getUserById(env.TOKEN_DB, userId);
+    const dbUser = await getUserById(env.DB, userId);
 
     if (!dbUser) {
       // getUserById already checks is_deleted, so null means not found OR deleted
@@ -800,7 +800,7 @@ async function executeAnalyzeCompetitorStrategyTool(
     if (cached) {
       console.log(`[Cache HIT] ${TOOL_NAME}`);
       await logToolUsage(
-        env.TOKEN_DB,
+        env.DB,
         userId,
         "facebook-ads-mcp",
         TOOL_NAME,
@@ -880,7 +880,7 @@ async function executeAnalyzeCompetitorStrategyTool(
 
     // STEP 4: Log Usage
     await logToolUsage(
-      env.TOKEN_DB,
+      env.DB,
       userId,
       "facebook-ads-mcp",
       TOOL_NAME,
@@ -951,7 +951,7 @@ async function executeFetchCreativeGalleryTool(
     if (cached) {
       console.log(`[Cache HIT] ${TOOL_NAME}`);
       await logToolUsage(
-        env.TOKEN_DB,
+        env.DB,
         userId,
         "facebook-ads-mcp",
         TOOL_NAME,
@@ -1007,7 +1007,7 @@ async function executeFetchCreativeGalleryTool(
 
     // STEP 4: Log Usage
     await logToolUsage(
-      env.TOKEN_DB,
+      env.DB,
       userId,
       "facebook-ads-mcp",
       TOOL_NAME,
@@ -1078,7 +1078,7 @@ async function executeCheckActivityPulseTool(
     if (cached) {
       console.log(`[Cache HIT] ${TOOL_NAME}`);
       await logToolUsage(
-        env.TOKEN_DB,
+        env.DB,
         userId,
         "facebook-ads-mcp",
         TOOL_NAME,
@@ -1119,7 +1119,7 @@ async function executeCheckActivityPulseTool(
 
     // STEP 4: Log Usage
     await logToolUsage(
-      env.TOKEN_DB,
+      env.DB,
       userId,
       "facebook-ads-mcp",
       TOOL_NAME,

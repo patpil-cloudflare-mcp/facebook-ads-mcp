@@ -252,7 +252,7 @@ app.get("/authorize", async (c) => {
         console.log(`✅ [OAuth] Valid session found for user: ${session.email}`);
 
         // CRITICAL: Query database for current user data (balance, deletion status)
-        const dbUser = await getUserByEmail(c.env.TOKEN_DB, session.email);
+        const dbUser = await getUserByEmail(c.env.DB, session.email);
 
         if (!dbUser) {
             console.log(`❌ [OAuth] User not found in database: ${session.email}`);
@@ -388,7 +388,7 @@ app.get("/callback", async (c) => {
 
     // CRITICAL: Check if user exists in token database
     console.log(`[MCP OAuth] Checking if user exists in database: ${user.email}`);
-    const dbUser = await getUserByEmail(c.env.TOKEN_DB, user.email);
+    const dbUser = await getUserByEmail(c.env.DB, user.email);
 
     // If user not found in database, reject authorization
     if (!dbUser) {

@@ -114,7 +114,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         console.log(`[Cache HIT] ${TOOL_NAME}`);
 
                         await logToolUsage(
-                            this.env.TOKEN_DB,
+                            this.env.DB,
                             userId,
                             "facebook-ads-mcp",
                             TOOL_NAME,
@@ -206,7 +206,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
                     // STEP 4: Log Usage
                     await logToolUsage(
-                        this.env.TOKEN_DB,
+                        this.env.DB,
                         userId,
                         "facebook-ads-mcp",
                         TOOL_NAME,
@@ -316,7 +316,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         console.log(`[Cache HIT] ${TOOL_NAME}`);
 
                         await logToolUsage(
-                            this.env.TOKEN_DB,
+                            this.env.DB,
                             userId,
                             "facebook-ads-mcp",
                             TOOL_NAME,
@@ -384,7 +384,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
                     // STEP 4: Log Usage
                     await logToolUsage(
-                        this.env.TOKEN_DB,
+                        this.env.DB,
                         userId,
                         "facebook-ads-mcp",
                         TOOL_NAME,
@@ -484,7 +484,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                         console.log(`[Cache HIT] ${TOOL_NAME}`);
 
                         await logToolUsage(
-                            this.env.TOKEN_DB,
+                            this.env.DB,
                             userId,
                             "facebook-ads-mcp",
                             TOOL_NAME,
@@ -536,7 +536,7 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
 
                     // STEP 4: Log Usage
                     await logToolUsage(
-                        this.env.TOKEN_DB,
+                        this.env.DB,
                         userId,
                         "facebook-ads-mcp",
                         TOOL_NAME,

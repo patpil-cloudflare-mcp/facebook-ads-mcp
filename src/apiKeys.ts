@@ -3,7 +3,7 @@
 
 // Minimal environment interface for API keys
 export interface ApiKeyEnv {
-  TOKEN_DB: D1Database;
+  DB: D1Database;
 }
 
 /**
@@ -81,7 +81,7 @@ export async function generateApiKey(
   };
 
   // Insert into database
-  await env.TOKEN_DB.prepare(`
+  await env.DB.prepare(`
     INSERT INTO api_keys (
       api_key_id,
       user_id,
@@ -140,7 +140,7 @@ export async function validateApiKey(
   const apiKeyHash = await hashApiKey(apiKey);
 
   // Look up key in database
-  const keyRecord = await env.TOKEN_DB.prepare(`
+  const keyRecord = await env.DB.prepare(`
     SELECT
       api_key_id,
       user_id,
@@ -169,7 +169,7 @@ export async function validateApiKey(
   }
 
   // Verify user still exists and is not deleted
-  const user = await env.TOKEN_DB.prepare(`
+  const user = await env.DB.prepare(`
     SELECT is_deleted FROM users WHERE user_id = ?
   `).bind(keyRecord.user_id).first<{ is_deleted: number }>();
 
@@ -180,7 +180,7 @@ export async function validateApiKey(
 
   // Update last_used_at timestamp (blocking to ensure audit trail accuracy)
   try {
-    const updateResult = await env.TOKEN_DB.prepare(`
+    const updateResult = await env.DB.prepare(`
       UPDATE api_keys
       SET last_used_at = ?
       WHERE api_key_id = ?
@@ -211,7 +211,7 @@ export async function listUserApiKeys(
   env: ApiKeyEnv,
   userId: string
 ): Promise<ApiKey[]> {
-  const results = await env.TOKEN_DB.prepare(`
+  const results = await env.DB.prepare(`
     SELECT
       api_key_id,
       user_id,
@@ -242,7 +242,7 @@ export async function revokeApiKey(
   apiKeyId: string,
   userId: string
 ): Promise<boolean> {
-  const result = await env.TOKEN_DB.prepare(`
+  const result = await env.DB.prepare(`
     UPDATE api_keys
     SET is_active = 0
     WHERE api_key_id = ? AND user_id = ?
@@ -268,7 +268,7 @@ export async function deleteAllUserApiKeys(
   env: ApiKeyEnv,
   userId: string
 ): Promise<number> {
-  const result = await env.TOKEN_DB.prepare(`
+  const result = await env.DB.prepare(`
     DELETE FROM api_keys WHERE user_id = ?
   `).bind(userId).run();
 

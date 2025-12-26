@@ -14,7 +14,7 @@ export interface Env {
     MCP_OBJECT: DurableObjectNamespace;
 
     /** D1 Database for token management (shared with mcp-token-system) */
-    TOKEN_DB: D1Database;
+    DB: D1Database;
 
     /** WorkOS Client ID (public, used to initiate OAuth flows) */
     WORKOS_CLIENT_ID: string;
