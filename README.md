@@ -9,7 +9,7 @@ Production-ready Cloudflare MCP server with Apify integration for Facebook Ad Li
 ✅ **Dual Transport Support** - Both SSE (legacy) and Streamable HTTP (future standard)
 ✅ **ChatGPT Ready** - Works with ChatGPT out-of-the-box (requires `/mcp` endpoint)
 ✅ **Claude Desktop Compatible** - Works with Claude Desktop via `/sse` endpoint
-✅ **Token System Integration** - Pay-per-use with shared D1 database
+✅ **Dual Authentication** - OAuth (WorkOS) + API key support with shared D1 database
 ✅ **WorkOS Magic Auth** - Email + 6-digit code authentication
 ✅ **Production-Ready** - Complete error handling, logging, type safety
 ✅ **15-30 Minute Setup** - Copy, customize, deploy
@@ -370,23 +370,37 @@ cd /Users/patpil/Documents/ai-projects/Cloudflare_mcp
 # - Runs initial validations
 ```
 
-## Token System
+## Authentication System
 
 ### How It Works
 
-1. User authenticates via WorkOS Magic Auth
-2. OAuth callback checks token database
-3. If user not in database → 403 error page
-4. If user in database → Access granted
-5. Each tool execution checks balance
-6. Tokens deducted after successful execution
-7. All transactions logged atomically
+This server supports **dual authentication** for maximum compatibility:
+
+#### 1. OAuth 2.1 (WorkOS AuthKit) - For OAuth-capable clients
+- User authenticates via WorkOS Magic Auth (email + 6-digit code)
+- OAuth callback checks user database
+- If user not in database → 403 error page
+- If user in database → Access granted
+- Used by: Claude Desktop, ChatGPT, OAuth-capable clients
+
+#### 2. API Key Authentication - For non-OAuth clients
+- Client sends `Authorization: Bearer wtyk_XXX` header
+- Server validates API key against database
+- If valid → Access granted
+- Used by: AnythingLLM, Cursor IDE, custom scripts
+
+### Database Schema (D1)
+
+The shared `mcp-oauth` database contains:
+- **users** - WorkOS user profiles and OAuth metadata
+- **api_keys** - API key authentication credentials
+- **account_deletions** - Audit log for GDPR compliance
 
 ### Example Tools Included
 
-- **simpleLookup** (1 token) - Simple data lookup demonstrating low-cost operations
-- **searchAndAnalyze** (2 tokens) - Consolidated search with filtering and analysis
-- **processWithSecurity** (3 tokens) - Secure data processing with PII redaction and output sanitization
+- **analyzeCompetitorStrategy** - Analyze competitor Facebook ad strategies
+- **fetchCreativeGallery** - Fetch creative assets from Facebook ads
+- **checkActivityPulse** - Quick check if a brand is running Facebook ads
 
 ## Phase 2 Security
 

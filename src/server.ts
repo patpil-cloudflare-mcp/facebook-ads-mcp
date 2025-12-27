@@ -136,6 +136,14 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                     const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
                     slot = await semaphore.acquireSlot(userId, ACTOR_ID);
 
+                    // STEP 3.8: Check if slot was acquired (Fast Fail pattern)
+                    if (!slot || !slot.acquired) {
+                        throw new Error(
+                            `Apify concurrency limit reached (${slot?.currentSlots ?? 'N/A'}/${slot?.maxSlots ?? 32} active runs). ` +
+                            `Please try again in ${slot?.estimatedWaitTime ?? 60} seconds.`
+                        );
+                    }
+
                     // STEP 4: Execute Apify Actor
                     const apifyClient = new ApifyClient(this.env.APIFY_API_TOKEN);
                     const results = await apifyClient.runActorSync<any>(
@@ -337,6 +345,14 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                     const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
                     slot = await semaphore.acquireSlot(userId, ACTOR_ID);
 
+                    // STEP 3.8: Check if slot was acquired (Fast Fail pattern)
+                    if (!slot || !slot.acquired) {
+                        throw new Error(
+                            `Apify concurrency limit reached (${slot?.currentSlots ?? 'N/A'}/${slot?.maxSlots ?? 32} active runs). ` +
+                            `Please try again in ${slot?.estimatedWaitTime ?? 60} seconds.`
+                        );
+                    }
+
                     // STEP 4: Execute Apify Actor
                     const apifyClient = new ApifyClient(this.env.APIFY_API_TOKEN);
                     const results = await apifyClient.runActorSync<any>(
@@ -504,6 +520,14 @@ export class FacebookAdsMCP extends McpAgent<Env, unknown, Props> {
                     const semaphoreId = this.env.APIFY_SEMAPHORE.idFromName("global");
                     const semaphore = this.env.APIFY_SEMAPHORE.get(semaphoreId) as any;
                     slot = await semaphore.acquireSlot(userId, ACTOR_ID);
+
+                    // STEP 3.8: Check if slot was acquired (Fast Fail pattern)
+                    if (!slot || !slot.acquired) {
+                        throw new Error(
+                            `Apify concurrency limit reached (${slot?.currentSlots ?? 'N/A'}/${slot?.maxSlots ?? 32} active runs). ` +
+                            `Please try again in ${slot?.estimatedWaitTime ?? 60} seconds.`
+                        );
+                    }
 
                     // STEP 4: Execute Apify Actor
                     const apifyClient = new ApifyClient(this.env.APIFY_API_TOKEN);

@@ -52,8 +52,8 @@ import { makeAIGatewayRequest, formatAIGatewayError } from "./ai-gateway";
  * 🔸 **Why This Is Safe:**
  *   - MCP servers are stateless (tools query database on each call)
  *   - Recreating a server doesn't cause data loss or corruption
- *   - Token consumption is atomic via D1 transactions (not cached)
- *   - User balances are ALWAYS queried from database (never cached)
+ *   - Tool usage logging is independent of the cache
+ *   - User data is ALWAYS queried from database (never cached)
  *
  * 🔸 **LRU Eviction:**
  *   - When cache reaches MAX_SIZE, the least recently used server is evicted
@@ -166,17 +166,15 @@ const serverCache = new LRUCache<string, McpServer>(MAX_CACHED_SERVERS);
  * @param request - Incoming HTTP request
  * @param env - Cloudflare Workers environment
  * @param ctx - Execution context
- * @param pathname - Request pathname (/sse or /mcp)
  * @returns MCP protocol response
  */
 export async function handleApiKeyRequest(
   request: Request,
   env: Env,
-  ctx: ExecutionContext,
-  pathname: string
+  ctx: ExecutionContext
 ): Promise<Response> {
   try {
-    console.log(`🔐 [API Key Auth] Request to ${pathname}`);
+    console.log(`🔐 [API Key Auth] Request to /mcp`);
 
     // 1. Extract API key from Authorization header
     const authHeader = request.headers.get("Authorization");
@@ -211,14 +209,8 @@ export async function handleApiKeyRequest(
     // 4. Create or get cached MCP server with tools
     const server = await getOrCreateServer(env, userId, dbUser.email);
 
-    // 5. Handle the MCP request using the appropriate transport
-    if (pathname === "/sse") {
-      return await handleSSETransport(server, request);
-    } else if (pathname === "/mcp") {
-      return await handleHTTPTransport(server, request, env, userId, dbUser.email);
-    } else {
-      return jsonError("Invalid endpoint. Use /sse or /mcp", 400);
-    }
+    // 5. Handle the MCP request using HTTP transport
+    return await handleHTTPTransport(server, request, env, userId, dbUser.email);
   } catch (error) {
     console.error("[API Key Auth] Error:", error);
     return jsonError(
@@ -818,6 +810,14 @@ async function executeAnalyzeCompetitorStrategyTool(
     const semaphore = env.APIFY_SEMAPHORE.get(semaphoreId) as any;
     slot = await semaphore.acquireSlot(userId, ACTOR_ID);
 
+    // STEP 3.8: Check if slot was acquired (Fast Fail pattern)
+    if (!slot || !slot.acquired) {
+      throw new Error(
+        `Apify concurrency limit reached (${slot?.currentSlots ?? 'N/A'}/${slot?.maxSlots ?? 32} active runs). ` +
+        `Please try again in ${slot?.estimatedWaitTime ?? 60} seconds.`
+      );
+    }
+
     // STEP 4: Execute Apify Actor
     const apifyClient = new ApifyClient(env.APIFY_API_TOKEN);
     const results = await apifyClient.runActorSync<any>(ACTOR_ID, actorInput, TIMEOUT);
@@ -969,6 +969,14 @@ async function executeFetchCreativeGalleryTool(
     const semaphore = env.APIFY_SEMAPHORE.get(semaphoreId) as any;
     slot = await semaphore.acquireSlot(userId, ACTOR_ID);
 
+    // STEP 3.8: Check if slot was acquired (Fast Fail pattern)
+    if (!slot || !slot.acquired) {
+      throw new Error(
+        `Apify concurrency limit reached (${slot?.currentSlots ?? 'N/A'}/${slot?.maxSlots ?? 32} active runs). ` +
+        `Please try again in ${slot?.estimatedWaitTime ?? 60} seconds.`
+      );
+    }
+
     // STEP 4: Execute Apify Actor
     const apifyClient = new ApifyClient(env.APIFY_API_TOKEN);
     const results = await apifyClient.runActorSync<any>(ACTOR_ID, actorInput, TIMEOUT);
@@ -1096,6 +1104,14 @@ async function executeCheckActivityPulseTool(
     const semaphore = env.APIFY_SEMAPHORE.get(semaphoreId) as any;
     slot = await semaphore.acquireSlot(userId, ACTOR_ID);
 
+    // STEP 3.8: Check if slot was acquired (Fast Fail pattern)
+    if (!slot || !slot.acquired) {
+      throw new Error(
+        `Apify concurrency limit reached (${slot?.currentSlots ?? 'N/A'}/${slot?.maxSlots ?? 32} active runs). ` +
+        `Please try again in ${slot?.estimatedWaitTime ?? 60} seconds.`
+      );
+    }
+
     // STEP 4: Execute Apify Actor
     const apifyClient = new ApifyClient(env.APIFY_API_TOKEN);
     const results = await apifyClient.runActorSync<any>(ACTOR_ID, actorInput, TIMEOUT);
@@ -1176,75 +1192,6 @@ function jsonRpcResponse(
       "Content-Type": "application/json",
     },
   });
-}
-
-/**
- * Handle SSE (Server-Sent Events) transport for MCP protocol
- *
- * SSE is used by AnythingLLM and other clients for real-time MCP communication.
- * This uses the standard MCP SDK SSEServerTransport for Cloudflare Workers.
- *
- * @param server - Configured MCP server instance
- * @param request - Incoming HTTP request
- * @returns SSE response stream
- */
-async function handleSSETransport(server: McpServer, request: Request): Promise<Response> {
-  console.log("📡 [API Key Auth] Setting up SSE transport");
-
-  try {
-    // For Cloudflare Workers, we need to return a Response with a ReadableStream
-    // The MCP SDK's SSEServerTransport expects Node.js streams, so we'll implement
-    // SSE manually for Cloudflare Workers compatibility
-
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
-    const encoder = new TextEncoder();
-
-    // Send SSE headers
-    const response = new Response(readable, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
-    });
-
-    // Connect server to client (handle in background)
-    // Note: This is a simplified implementation for API key auth
-    // Full SSE support would require handling POST messages from client
-
-    (async () => {
-      try {
-        // Send initial connection event
-        await writer.write(encoder.encode("event: message\n"));
-        await writer.write(encoder.encode('data: {"status":"connected"}\n\n'));
-
-        console.log("✅ [API Key Auth] SSE connection established");
-
-        // Keep connection alive
-        const keepAliveInterval = setInterval(async () => {
-          try {
-            await writer.write(encoder.encode(": keepalive\n\n"));
-          } catch (e) {
-            clearInterval(keepAliveInterval);
-          }
-        }, 30000);
-
-        // Note: Full MCP protocol implementation would go here
-        // For MVP, we're providing basic SSE connectivity
-      } catch (error) {
-        console.error("❌ [API Key Auth] SSE error:", error);
-        await writer.close();
-      }
-    })();
-
-    return response;
-  } catch (error) {
-    console.error("❌ [API Key Auth] SSE transport error:", error);
-    throw error;
-  }
 }
 
 /**

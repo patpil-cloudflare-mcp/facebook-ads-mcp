@@ -4,7 +4,7 @@
  * This MCP server uses:
  * - Durable Objects: Required by McpAgent for MCP protocol handling and WebSocket connections
  * - KV Namespace: Required for OAuth token storage and session management
- * - D1 Database: Shared token management database (mcp-oauth)
+ * - D1 Database: Shared database for user authentication and API key management (mcp-oauth)
  * - WorkOS Secrets: API Key and Client ID for authentication
  *
  * TODO: Update the following:
@@ -106,11 +106,13 @@
     }
   ],
   /**
-   * REQUIRED for token system: Shared D1 database
+   * REQUIRED: Shared D1 database for authentication
    *
    * Database ID: eac93639-d58e-4777-82e9-f1e28113d5b2
-   * This is the shared database used by ALL MCP servers for token management.
+   * This is the shared database used by ALL MCP servers for user authentication and API key management.
    * DO NOT change this ID - it must be the same across all your MCP servers.
+   *
+   * Tables: users, api_keys, account_deletions
    */
   "d1_databases": [
     {
