@@ -1,6 +1,6 @@
 # Facebook Ads MCP Server
 
-**Last Deployment Test**: 2025-11-20 (GitHub → Cloudflare Workers Builds Integration Test)
+**Last Deployment**: 2025-12-28 (Manual wrangler deploy - Production)
 
 Production-ready Cloudflare MCP server with Apify integration for Facebook Ad Library intelligence.
 
