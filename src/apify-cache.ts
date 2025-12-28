@@ -6,7 +6,6 @@
  * Problem: Popular resources (viral tweets, trending videos) get requested repeatedly.
  * Without caching, each request costs:
  * - Apify API call ($$$)
- * - Token consumption from user
  * - 30-60s wait time
  *
  * Solution: 15-minute KV cache for hot queries
@@ -14,14 +13,12 @@
  * Benefits:
  * - Cache hit = 0 Apify cost (50-70% cost reduction)
  * - Instant response (<50ms vs 30s+)
- * - Still charge user tokens (100% margin)
  * - No semaphore slot consumed on cache hit
  *
  * Flow (CRITICAL ORDER):
- * 1. Check balance
- * 2. Check cache (KV) ← BEFORE semaphore
- * 3. If HIT: Return cached, skip semaphore entirely
- * 4. If MISS: Acquire semaphore → Call Apify → Cache result
+ * 1. Check cache (KV) ← BEFORE semaphore
+ * 2. If HIT: Return cached, skip semaphore entirely
+ * 3. If MISS: Acquire semaphore → Call Apify → Cache result
  *
  * Cache Key Strategy:
  * - Format: "apify:{actorId}:{inputHash}"

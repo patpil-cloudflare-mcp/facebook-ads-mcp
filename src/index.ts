@@ -21,11 +21,10 @@ export { ApifySemaphore } from "./apify-semaphore";  // CRITICAL: Concurrency co
  * 2. API Key Authentication - For non-OAuth clients
  *    - Flow: Client sends Authorization: Bearer wtyk_XXX → Validate → Tools
  *    - Used by: AnythingLLM, Cursor IDE, custom scripts
- *    - Endpoints: /sse, /mcp (with wtyk_ API key in header)
+ *    - Endpoint: /mcp (with wtyk_ API key in header)
  *
- * MCP Endpoints (support both auth methods):
- * - /sse - Server-Sent Events transport (for AnythingLLM, Claude Desktop)
- * - /mcp - Streamable HTTP transport (for ChatGPT and modern clients)
+ * MCP Endpoint (supports both auth methods):
+ * - /mcp - Streamable HTTP transport (JSON-RPC 2.0 protocol)
  *
  * OAuth Endpoints (OAuth only):
  * - /authorize - Initiates OAuth flow, redirects to WorkOS AuthKit
@@ -42,10 +41,9 @@ export { ApifySemaphore } from "./apify-semaphore";  // CRITICAL: Concurrency co
 
 // Create OAuthProvider instance (used when OAuth authentication is needed)
 const oauthProvider = new OAuthProvider({
-    // Dual transport support (SSE + Streamable HTTP)
+    // Streamable HTTP transport (JSON-RPC 2.0)
     // This ensures compatibility with all MCP clients (Claude, ChatGPT, etc.)
     apiHandlers: {
-        '/sse': FacebookAdsMCP.serveSSE('/sse'),
         '/mcp': FacebookAdsMCP.serve('/mcp'),
     },
 
@@ -75,10 +73,10 @@ export default {
             const url = new URL(request.url);
             const authHeader = request.headers.get("Authorization");
 
-            // Check for API key authentication on MCP endpoints
+            // Check for API key authentication on MCP endpoint
             if (isApiKeyRequest(url.pathname, authHeader)) {
                 console.log(`🔐 [Dual Auth] API key request detected: ${url.pathname}`);
-                return await handleApiKeyRequest(request, env, ctx, url.pathname);
+                return await handleApiKeyRequest(request, env, ctx);
             }
 
             // Otherwise, use OAuth flow
@@ -105,7 +103,7 @@ export default {
  * Detect if request should use API key authentication
  *
  * Criteria:
- * 1. Must be an MCP endpoint (/sse or /mcp)
+ * 1. Must be the MCP endpoint (/mcp)
  * 2. Must have Authorization header with API key (starts with wtyk_)
  *
  * OAuth endpoints (/authorize, /callback, /token, /register) are NEVER intercepted.
@@ -115,8 +113,8 @@ export default {
  * @returns true if API key request, false otherwise
  */
 function isApiKeyRequest(pathname: string, authHeader: string | null): boolean {
-    // Only intercept MCP transport endpoints
-    if (pathname !== "/sse" && pathname !== "/mcp") {
+    // Only intercept MCP transport endpoint
+    if (pathname !== "/mcp") {
         return false;
     }
 
